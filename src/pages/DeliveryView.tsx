@@ -42,6 +42,7 @@ import { formatCentsToBRL } from '../utils/currency';
 import { whatsappService } from '../services/whatsappService';
 import { useNetwork } from '../hooks/useNetwork';
 import { OrderEditForm } from '../components/orders/OrderEditForm';
+import { PaymentConfirmationModal } from '../components/orders/PaymentConfirmationModal';
 import {
   getOrderStatusConfig,
   getPaymentStatusConfig,
@@ -94,6 +95,9 @@ export function DeliveryView() {
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
+
+  // Payment Confirmation Modal State (Etapa 09.9)
+  const [paymentModalOrder, setPaymentModalOrder] = useState<Order | null>(null);
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -808,6 +812,22 @@ export function DeliveryView() {
                         </div>
                       </div>
 
+                      {/* Botão de Confirmação de Pagamento Pendente na Entrega */}
+                      {order.paymentStatus === 'PENDING' && order.status !== 'CANCELLED' && (
+                        <button
+                          id={`btn-delivery-card-pay-${order.id}`}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPaymentModalOrder(order);
+                          }}
+                          className="w-full py-1.5 px-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Confirmar Pagamento ({formatCentsToBRL(order.total || 0)})</span>
+                        </button>
+                      )}
+
                       {/* Barra de Ações Operacionais */}
                       <div className="flex items-center gap-2">
                         <Button
@@ -1274,6 +1294,24 @@ export function DeliveryView() {
                     </div>
                   </div>
                 )}
+
+                {/* BOTÃO DE CONFIRMAÇÃO DE PAGAMENTO NA ENTREGA (ETAPA 09.9) */}
+                {selectedOrder.paymentStatus === 'PENDING' && selectedOrder.status !== 'CANCELLED' && (
+                  <div className="pt-2.5 border-t border-slate-200 flex flex-col gap-1.5">
+                    <button
+                      id="btn-delivery-drawer-confirm-payment"
+                      type="button"
+                      onClick={() => setPaymentModalOrder(selectedOrder)}
+                      className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Confirmar Pagamento no Caixa ({formatCentsToBRL(selectedOrder.total || 0)})</span>
+                    </button>
+                    <span className="text-[10px] text-slate-400 text-center font-medium">
+                      Registra a venda no Caixa Operacional e altera para PAGO
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* 5. AÇÕES DE MUDANÇA DE STATUS */}
@@ -1310,6 +1348,17 @@ export function DeliveryView() {
           )
         )}
       </Drawer>
+
+      {/* MODAL DE CONFIRMAÇÃO DE PAGAMENTO NA ENTREGA (ETAPA 09.9) */}
+      <PaymentConfirmationModal
+        isOpen={Boolean(paymentModalOrder)}
+        order={paymentModalOrder}
+        onClose={() => setPaymentModalOrder(null)}
+        onPaymentConfirmed={async (updatedOrder) => {
+          setSelectedOrder(updatedOrder);
+          await loadDeliveryOrders();
+        }}
+      />
     </div>
   );
 }

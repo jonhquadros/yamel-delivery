@@ -6,6 +6,7 @@
 import { Order, OrderStatus, OrderOrigin, PaymentStatus, OrderItem, OrderCustomerSnapshot, OrderDeliverySnapshot, PaymentMethod, Table, ProductionTicket } from './storage/types';
 import { ordersRepository, productionRepository, tablesRepository, cashRepository, productsRepository, syncQueueRepository, getOrRegisterDeviceId, generateLocalId } from './storage';
 import { localDB } from './storage/idb';
+import { formatCentsToBRL } from '../utils/currency';
 
 /**
  * Validates if a transition from currentStatus to nextStatus is allowed according to business logic.
@@ -1278,3 +1279,136 @@ export async function sendRoundToPreparation(
     tickets: targetTickets,
   };
 }
+
+// =========================================================================
+// NÚCLEO DE DOMÍNIO — CONFIRMAÇÃO DE PAGAMENTO NA ENTREGA (ETAPA 09.9)
+// =========================================================================
+
+export interface ConfirmCatalogDeliveryPaymentParams {
+  orderId: string;
+  paymentMethod?: PaymentMethod;
+  receivedAmountCents?: number;
+  cashierId?: string;
+  cashierName?: string;
+  notes?: string;
+  completeOrderAfterPayment?: boolean;
+}
+
+export interface ConfirmCatalogDeliveryPaymentResult {
+  order: Order;
+  changeDueCents: number;
+  cashMovementCreated: boolean;
+  registeredCashRegisterId?: string;
+}
+
+/**
+ * Confirma o recebimento financeiro de pedidos de Catálogo / Delivery com pagamento pendente,
+ * garantindo integração estrita com o Caixa Operacional (gerando SALE no caixa aberto),
+ * concorrência via reconsulta IndexedDB, cálculo matemático de troco em centavos inteiros,
+ * idempotência absoluta e preservação total do fluxo de produção no KDS.
+ */
+export async function confirmCatalogDeliveryPayment(
+  params: ConfirmCatalogDeliveryPaymentParams
+): Promise<ConfirmCatalogDeliveryPaymentResult> {
+  const {
+    orderId,
+    paymentMethod,
+    receivedAmountCents,
+    cashierId,
+    cashierName,
+    notes,
+    completeOrderAfterPayment,
+  } = params;
+
+  if (!orderId) {
+    throw new Error('ID do pedido não informado para confirmação de pagamento.');
+  }
+
+  // 1. Reconsulta fresca no IndexedDB para concorrência e integridade
+  const freshOrder = await ordersRepository.getById(orderId);
+  if (!freshOrder) {
+    throw new Error('Pedido não encontrado no IndexedDB.');
+  }
+
+  // 2. Validações de integridade de estado
+  if (freshOrder.status === 'CANCELLED') {
+    throw new Error('Não é possível confirmar o pagamento de um pedido cancelado.');
+  }
+
+  if (freshOrder.total < 0 || isNaN(freshOrder.total)) {
+    throw new Error('O valor total do pedido é inválido para cobrança.');
+  }
+
+  // 3. Idempotência estrita: se já estiver PAGO, retorna o estado sem duplicar movimentação de caixa
+  if (freshOrder.paymentStatus === 'PAID') {
+    return {
+      order: freshOrder,
+      changeDueCents: 0,
+      cashMovementCreated: false,
+    };
+  }
+
+  // 4. Validação obrigatória de Caixa Operacional Aberto
+  const openRegister = await cashRepository.getOpenRegister();
+  if (!openRegister) {
+    throw new Error('Não é possível confirmar o pagamento porque não existe um Caixa aberto.');
+  }
+
+  // 5. Determinação da Forma de Pagamento Efetiva
+  const effectivePaymentMethod = paymentMethod || freshOrder.paymentMethod;
+  if (!effectivePaymentMethod) {
+    throw new Error('Forma de pagamento não informada. Selecione o meio de pagamento utilizado.');
+  }
+
+  // 6. Tratamento de Dinheiro (CASH) e Troco em centavos inteiros
+  let changeDueCents = 0;
+  if (effectivePaymentMethod === 'CASH') {
+    const totalToPay = freshOrder.total;
+    const received = receivedAmountCents !== undefined && receivedAmountCents > 0
+      ? Math.round(receivedAmountCents)
+      : (freshOrder.changeFor && freshOrder.changeFor >= totalToPay ? freshOrder.changeFor : totalToPay);
+
+    if (received < totalToPay) {
+      throw new Error(`Valor recebido em dinheiro (${formatCentsToBRL(received)}) é inferior ao total do pedido (${formatCentsToBRL(totalToPay)}).`);
+    }
+
+    changeDueCents = Math.max(0, received - totalToPay);
+    freshOrder.changeFor = received;
+  }
+
+  const now = new Date().toISOString();
+
+  // 7. Atualização do Pedido
+  freshOrder.paymentMethod = effectivePaymentMethod;
+  freshOrder.paymentStatus = 'PAID';
+  freshOrder.updatedAt = now;
+
+  if (cashierId) {
+    freshOrder.cashierId = cashierId;
+  }
+
+  if (notes && notes.trim()) {
+    freshOrder.notes = freshOrder.notes
+      ? `${freshOrder.notes} (Pgto: ${notes.trim()})`
+      : `Pgto: ${notes.trim()}`;
+  }
+
+  if (completeOrderAfterPayment) {
+    freshOrder.status = 'COMPLETED';
+    freshOrder.completedAt = now;
+  }
+
+  // 8. Persistência no IndexedDB e Outbox (atualiza dados e sincroniza tickets)
+  await ordersRepository.update(freshOrder);
+
+  // 9. Sincronização garantida da movimentação de venda (SALE) no Caixa aberto
+  await cashRepository.syncOrderCashMovement(freshOrder, cashierId, cashierName);
+
+  return {
+    order: freshOrder,
+    changeDueCents,
+    cashMovementCreated: true,
+    registeredCashRegisterId: openRegister.id,
+  };
+}
+

@@ -37,6 +37,7 @@ import { Drawer } from '../components/ui/Overlay';
 import { LoadingState } from '../components/ui/Feedback';
 import { whatsappService } from '../services/whatsappService';
 import { OrderEditForm } from '../components/orders/OrderEditForm';
+import { PaymentConfirmationModal } from '../components/orders/PaymentConfirmationModal';
 import {
   getOrderOriginConfig,
   getOrderStatusConfig,
@@ -65,6 +66,9 @@ export function PedidosView() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [sendingRoundId, setSendingRoundId] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
+
+  // Payment Confirmation Modal State (Etapa 09.9)
+  const [paymentModalOrder, setPaymentModalOrder] = useState<Order | null>(null);
 
   const handleSendRoundToPreparo = async (roundId: string) => {
     if (!selectedOrder || sendingRoundId === roundId) return;
@@ -567,6 +571,21 @@ export function PedidosView() {
                     </span>
                   </div>
 
+                  {order.paymentStatus === 'PENDING' && order.status !== 'CANCELLED' && (
+                    <button
+                      id={`btn-card-confirm-payment-${order.id}`}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPaymentModalOrder(order);
+                      }}
+                      className="w-full py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Confirmar Pagamento</span>
+                    </button>
+                  )}
+
                   <div className="flex items-center justify-between text-[10px] text-slate-400 font-medium pt-1">
                     <span className="flex items-center gap-1 text-slate-400">
                       <CloudOff className="w-3 h-3" /> IndexedDB Local
@@ -876,6 +895,24 @@ export function PedidosView() {
                     Troco para: {formatCentsToBRL(selectedOrder.changeFor)} (Troco: {formatCentsToBRL(selectedOrder.changeFor - (selectedOrder.total || 0))})
                   </div>
                 )}
+
+                {/* BOTÃO DE CONFIRMAÇÃO DE PAGAMENTO NA ENTREGA (ETAPA 09.9) */}
+                {selectedOrder.paymentStatus === 'PENDING' && selectedOrder.status !== 'CANCELLED' && (
+                  <div className="pt-2 border-t border-slate-200 flex flex-col gap-1.5">
+                    <button
+                      id="btn-drawer-confirm-payment"
+                      type="button"
+                      onClick={() => setPaymentModalOrder(selectedOrder)}
+                      className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Confirmar Pagamento no Caixa ({formatCentsToBRL(selectedOrder.total || 0)})</span>
+                    </button>
+                    <span className="text-[10px] text-slate-400 text-center font-medium">
+                      Registra a venda (SALE) no Caixa Operacional aberto
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* AÇÕES DE MUDANÇA DE STATUS (CONCORRÊNCIA E IDEMPOTÊNCIA PROTEGIDAS) */}
@@ -910,6 +947,17 @@ export function PedidosView() {
           )
         )}
       </Drawer>
+
+      {/* MODAL DE CONFIRMAÇÃO DE PAGAMENTO NA ENTREGA / CAIXA (ETAPA 09.9) */}
+      <PaymentConfirmationModal
+        isOpen={Boolean(paymentModalOrder)}
+        order={paymentModalOrder}
+        onClose={() => setPaymentModalOrder(null)}
+        onPaymentConfirmed={async (updatedOrder) => {
+          setSelectedOrder(updatedOrder);
+          await loadData();
+        }}
+      />
     </div>
   );
 }

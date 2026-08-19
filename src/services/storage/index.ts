@@ -763,15 +763,42 @@ export const productionRepository = {
     const ticket = await localDB.get<ProductionTicket>('production_tickets', ticketId);
     if (!ticket) throw new Error('Ticket de produção não encontrado');
 
+    // Idempotência: Se já estiver no status desejado, retorna sem duplicar operações
+    if (ticket.status === newStatus) {
+      return ticket;
+    }
+
+    // Regras de Concorrência e integridade do KDS:
+    // 1. Ticket cancelado não pode ser reaberto por esta rota
+    if (ticket.status === 'CANCELLED') {
+      return ticket;
+    }
+    // 2. Ticket que já está READY não pode regredir para PENDING ou PREPARING (evita ação atrasada de outro operador)
+    if (ticket.status === 'READY' && (newStatus === 'PENDING' || newStatus === 'PREPARING')) {
+      return ticket;
+    }
+    // 3. Ticket que já está PREPARING não pode regredir para PENDING
+    if (ticket.status === 'PREPARING' && newStatus === 'PENDING') {
+      return ticket;
+    }
+
     const now = new Date().toISOString();
     ticket.status = newStatus;
     ticket.updatedAt = now;
 
-    ticket.items = ticket.items.map(item => ({
-      ...item,
-      status: newStatus,
-      updatedAt: now
-    }));
+    ticket.items = ticket.items.map(item => {
+      if (item.status === 'CANCELLED') return item;
+      if (newStatus === 'PREPARING' && item.status === 'PENDING') {
+        return { ...item, status: 'PREPARING', updatedAt: now };
+      }
+      if (newStatus === 'READY' && (item.status === 'PENDING' || item.status === 'PREPARING')) {
+        return { ...item, status: 'READY', updatedAt: now };
+      }
+      if (newStatus === 'CANCELLED') {
+        return { ...item, status: 'CANCELLED', updatedAt: now };
+      }
+      return item;
+    });
 
     await localDB.put('production_tickets', ticket);
 
@@ -794,14 +821,14 @@ export const productionRepository = {
           if (order.items) {
             order.items = order.items.map(it => {
               const matched = ticketItemMap.get(it.id);
-              if (matched) {
+              if (matched && matched !== it.status) {
                 return { ...it, status: matched, updatedAt: now };
               }
               return it;
             });
           }
 
-          const allTickets = (await this.getAllTickets()).filter(t => t.orderId === order.id);
+          const allTickets = (await this.getAllTickets()).filter(t => t.orderId === order.id && !t.deletedAt);
           if (allTickets.length > 0) {
             if (allTickets.every(t => t.status === 'READY')) {
               if (order.status !== 'READY') {

@@ -39,7 +39,7 @@ export class WhatsAppService {
    * Formats a structured delivery or order message to send over WhatsApp.
    */
   public formatOrderMessage(payload: WhatsAppMessagePayload): string {
-    let message = `*Yamel — Novo Pedido* 🍔\n\n`;
+    let message = `*Yamel — Pedido* 🍔\n\n`;
     
     if (payload.orderId) {
       message += `*Pedido:* #${payload.orderId}\n`;
