@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Yamel — Delivery + PDV</title>
+    <meta name="description" content="Sistema de pedidos, delivery, PDV e gestão operacional da Yamel." />
+    <meta property="og:title" content="Yamel — Delivery + PDV" />
+    <meta property="og:description" content="Sistema de pedidos, delivery, PDV e gestão operacional da Yamel." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <!-- PWA & Mobile Optimization -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#d97706" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Yamel" />
+    <link rel="apple-touch-icon" href="https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?auto=format&fit=crop&w=192&q=80" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then((reg) => console.log('[PWA] Service Worker registrado com sucesso:', reg.scope))
+            .catch((err) => console.error('[PWA] Falha ao registrar Service Worker:', err));
+        });
+      }
+    </script>
+  </body>
+</html>
+

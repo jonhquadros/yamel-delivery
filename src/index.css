@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --color-yamel-50: #fffbeb;
+  --color-yamel-100: #fef3c7;
+  --color-yamel-200: #fde68a;
+  --color-yamel-300: #fcd34d;
+  --color-yamel-400: #fbbf24;
+  --color-yamel-500: #f59e0b;
+  --color-yamel-600: #d97706;
+  --color-yamel-700: #b45309;
+  --color-yamel-800: #92400e;
+  --color-yamel-900: #78350f;
+
+  --color-brand-primary: var(--color-yamel-600);
+  --color-brand-primary-hover: var(--color-yamel-700);
+  --color-brand-primary-light: var(--color-yamel-100);
+
+  --color-status-success: var(--color-emerald-600);
+  --color-status-warning: var(--color-amber-500);
+  --color-status-error: var(--color-red-600);
+  --color-status-info: var(--color-blue-600);
+
+  --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased selection:bg-yamel-100 selection:text-yamel-900;
+  }
+}
+
+/* Operational design patterns for speedy interaction (no-scrollbar, focus helpers) */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

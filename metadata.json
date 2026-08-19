@@ -1,0 +1,6 @@
+{
+  "name": "Yamel",
+  "description": "Sistema de pedidos, delivery, PDV e gestão operacional da Yamel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
