@@ -5,12 +5,13 @@
 
 import { 
   Company, User, Category, Product, ProductOption, ProductAddon,
+  AccompanimentGroup, AccompanimentItem, ProductAccompanimentLink,
   Table, Customer, Order, OrderItem, CashRegister, CashMovement,
   Delivery, SyncQueueItem, Device
 } from './types';
 
 const DB_NAME = 'yamel_offline_db_v2';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 export type StoreName =
   | 'companies'
@@ -19,6 +20,9 @@ export type StoreName =
   | 'products'
   | 'product_options'
   | 'product_addons'
+  | 'accompaniment_groups'
+  | 'accompaniment_items'
+  | 'product_accompaniment_links'
   | 'tables'
   | 'customers'
   | 'orders'
@@ -83,6 +87,29 @@ export class YamelDB {
         if (!db.objectStoreNames.contains('product_addons')) {
           const store = db.createObjectStore('product_addons', { keyPath: 'id' });
           store.createIndex('productId', 'productId', { unique: false });
+        }
+
+        // 6.1 Accompaniment Groups
+        if (!db.objectStoreNames.contains('accompaniment_groups')) {
+          const store = db.createObjectStore('accompaniment_groups', { keyPath: 'id' });
+          store.createIndex('sortOrder', 'sortOrder', { unique: false });
+          store.createIndex('active', 'active', { unique: false });
+          store.createIndex('scope', 'scope', { unique: false });
+        }
+
+        // 6.2 Accompaniment Items
+        if (!db.objectStoreNames.contains('accompaniment_items')) {
+          const store = db.createObjectStore('accompaniment_items', { keyPath: 'id' });
+          store.createIndex('groupId', 'groupId', { unique: false });
+          store.createIndex('active', 'active', { unique: false });
+          store.createIndex('sortOrder', 'sortOrder', { unique: false });
+        }
+
+        // 6.3 Product Accompaniment Links
+        if (!db.objectStoreNames.contains('product_accompaniment_links')) {
+          const store = db.createObjectStore('product_accompaniment_links', { keyPath: 'id' });
+          store.createIndex('productId', 'productId', { unique: false });
+          store.createIndex('groupId', 'groupId', { unique: false });
         }
 
         // 7. Tables

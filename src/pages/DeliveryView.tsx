@@ -1209,7 +1209,20 @@ export function DeliveryView() {
                         <span>{formatCentsToBRL(item.subtotal)}</span>
                       </div>
 
-                      {/* Options / Addons */}
+                      {/* Accompaniments / Options / Addons */}
+                      {item.selectedAccompaniments && item.selectedAccompaniments.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1 pl-4">
+                          {item.selectedAccompaniments.map((acc, aIdx) => (
+                            <span
+                              key={aIdx}
+                              className="text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.2 rounded"
+                            >
+                              +{acc.quantity}x {acc.itemName || acc.itemNameSnapshot}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
                       {item.selectedOptions && item.selectedOptions.length > 0 && (
                         <div className="text-[11px] text-slate-500 pl-4">
                           {item.selectedOptions.map((opt, oIdx) => (

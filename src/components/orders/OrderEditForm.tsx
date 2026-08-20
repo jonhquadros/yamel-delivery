@@ -39,8 +39,16 @@ import {
 import {
   productsRepository,
   categoriesRepository,
-  generateLocalId
+  generateLocalId,
+  getAccompanimentGroupsForProduct
 } from '../../services/storage';
+import { AccompanimentSelector } from '../accompaniments/AccompanimentSelector';
+import {
+  AccompanimentGroupWithItems,
+  calculateTotalAccompanimentsPrice,
+  validateAccompanimentSelections,
+  buildOrderItemAccompaniments
+} from '../../services/accompanimentService';
 import {
   getOrderEditPermissions,
   calculateOrderFinancials,
@@ -116,6 +124,8 @@ export function OrderEditForm({ order, onCancel, onSaveSuccess }: OrderEditFormP
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('ALL');
   const [productSearch, setProductSearch] = useState<string>('');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [productAccompaniments, setProductAccompaniments] = useState<AccompanimentGroupWithItems[]>([]);
+  const [selectedAccompaniments, setSelectedAccompaniments] = useState<Record<string, Record<string, number>>>({});
   const [productOptions, setProductOptions] = useState<ProductOption[]>([]);
   const [productAddons, setProductAddons] = useState<ProductAddon[]>([]);
   const [selectedOptionsMap, setSelectedOptionsMap] = useState<Record<string, { choiceId: string; choiceName: string; price: number }>>({});
@@ -140,9 +150,11 @@ export function OrderEditForm({ order, onCancel, onSaveSuccess }: OrderEditFormP
     loadCatalog();
   }, []);
 
-  // Quando abre a seleção de um produto específico, carrega suas opções e adicionais
+  // Quando abre a seleção de um produto específico, carrega seus acompanhamentos, opções e adicionais
   useEffect(() => {
     if (!selectedProduct) {
+      setProductAccompaniments([]);
+      setSelectedAccompaniments({});
       setProductOptions([]);
       setProductAddons([]);
       setSelectedOptionsMap({});
@@ -154,12 +166,24 @@ export function OrderEditForm({ order, onCancel, onSaveSuccess }: OrderEditFormP
 
     async function loadProductDetails() {
       try {
-        const [options, addons] = await Promise.all([
+        const [accGroups, options, addons] = await Promise.all([
+          getAccompanimentGroupsForProduct(selectedProduct!.id),
           productsRepository.getOptions(selectedProduct!.id),
           productsRepository.getAddons(selectedProduct!.id)
         ]);
+
+        setProductAccompaniments(accGroups);
         setProductOptions(options);
         setProductAddons(addons);
+
+        // Preenche escolhas iniciais para acompanhamentos obrigatórios de seleção única
+        const initialAccs: Record<string, Record<string, number>> = {};
+        accGroups.forEach(({ group, items: gItems }) => {
+          if (group.required && group.maxSelections === 1 && gItems.length > 0) {
+            initialAccs[group.id] = { [gItems[0].id]: 1 };
+          }
+        });
+        setSelectedAccompaniments(initialAccs);
 
         // Preenche opções obrigatórias com a primeira escolha por padrão
         const initialOpts: Record<string, { choiceId: string; choiceName: string; price: number }> = {};
@@ -300,8 +324,22 @@ export function OrderEditForm({ order, onCancel, onSaveSuccess }: OrderEditFormP
   const handleAddProductToOrder = () => {
     if (!selectedProduct) return;
 
-    // Calcular preço unitário somando produto + opções + adicionais
-    let unitPrice = selectedProduct.price;
+    // 1. Validação de Acompanhamentos
+    if (productAccompaniments.length > 0) {
+      const validation = validateAccompanimentSelections(productAccompaniments, selectedAccompaniments);
+      if (!validation.isValid) {
+        const msg = validation.errors[0]?.message || 'Por favor, selecione as opções obrigatórias de acompanhamento.';
+        alert(msg);
+        return;
+      }
+    }
+
+    // Calcular preço unitário somando produto + acompanhamentos + opções + adicionais
+    const accompanimentsExtraPrice = calculateTotalAccompanimentsPrice(productAccompaniments, selectedAccompaniments);
+    let unitPrice = selectedProduct.price + accompanimentsExtraPrice;
+
+    // Snapshot congelado dos acompanhamentos
+    const formattedAccompaniments = buildOrderItemAccompaniments(productAccompaniments, selectedAccompaniments);
 
     const selectedOptionsList: OrderItemOption[] = [];
     Object.keys(selectedOptionsMap).forEach((optionId) => {
@@ -344,6 +382,7 @@ export function OrderEditForm({ order, onCancel, onSaveSuccess }: OrderEditFormP
       quantity: newProductQuantity,
       subtotal: totalItemSubtotal,
       status: 'PENDING',
+      selectedAccompaniments: formattedAccompaniments.length > 0 ? formattedAccompaniments : undefined,
       selectedOptions: selectedOptionsList.length > 0 ? selectedOptionsList : undefined,
       selectedAddons: selectedAddonsList.length > 0 ? selectedAddonsList : undefined,
       notes: newProductNotes.trim() ? newProductNotes.trim() : undefined,
@@ -663,7 +702,19 @@ export function OrderEditForm({ order, onCancel, onSaveSuccess }: OrderEditFormP
                         {formatCentsToBRL(item.unitPrice)} un.
                       </span>
 
-                      {/* Opções e Adicionais selecionados */}
+                      {/* Acompanhamentos, Opções e Adicionais selecionados */}
+                      {item.selectedAccompaniments && item.selectedAccompaniments.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {item.selectedAccompaniments.map((acc, aIdx) => (
+                            <span
+                              key={aIdx}
+                              className="text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.2 rounded"
+                            >
+                              +{acc.quantity}x {acc.itemName || acc.itemNameSnapshot}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       {item.selectedOptions && item.selectedOptions.length > 0 && (
                         <div className="text-[10px] text-slate-500 mt-0.5">
                           {item.selectedOptions.map(opt => `${opt.optionName}: ${opt.choiceName}`).join(', ')}
@@ -969,6 +1020,17 @@ export function OrderEditForm({ order, onCancel, onSaveSuccess }: OrderEditFormP
                 {formatCentsToBRL(selectedProduct.price)}
               </span>
             </div>
+
+            {/* Acompanhamentos por Categoria / Resolução Central */}
+            {productAccompaniments.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <AccompanimentSelector
+                  groupsWithItems={productAccompaniments}
+                  selectedItems={selectedAccompaniments}
+                  onChange={setSelectedAccompaniments}
+                />
+              </div>
+            )}
 
             {/* Opções do Produto (Ex: Ponto da Carne, Tamanho) */}
             {productOptions.map(opt => (

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, ReactNode } from 'react';
+import { useState, useEffect, ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard,
@@ -18,6 +18,7 @@ import {
   Sparkles,
   RefreshCw,
   FolderOpen,
+  Layers,
   User,
   Settings,
   BarChart,
@@ -35,12 +36,23 @@ import { ConnectionStatus } from '../components/ui/Feedback';
 import { Dropdown } from '../components/ui/Overlay';
 import { WhatsAppButton } from '../components/ui/WhatsAppButton';
 import { useNetwork } from '../services/storage/useNetwork';
+import { cartService } from '../services/cartService';
 
 // ----------------------------------------------------------------------
 // 1. PUBLIC LAYOUT
 // ----------------------------------------------------------------------
 export function PublicLayout({ children }: { children: ReactNode }) {
   const { path } = useRouter();
+  const [cart, setCart] = useState(() => cartService.getCart());
+
+  useEffect(() => {
+    const unsubscribe = cartService.subscribe(() => {
+      setCart(cartService.getCart());
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const totalCartCount = cart.items.reduce((acc, item) => acc + item.quantity, 0);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col text-slate-800 antialiased font-sans selection:bg-amber-100">
@@ -62,16 +74,21 @@ export function PublicLayout({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-4">
             <Link 
               to="/catalogo/carrinho" 
-              className={`relative p-2 rounded-xl transition-all border ${
+              className={`relative p-2.5 rounded-xl transition-all border flex items-center justify-center ${
                 path === '/catalogo/carrinho' 
                   ? 'bg-amber-600 border-amber-600 text-white shadow-xs' 
-                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  : totalCartCount > 0
+                    ? 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100 shadow-xs ring-2 ring-amber-500/20'
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
               }`}
+              title="Carrinho de Compras"
             >
               <ShoppingCart className="w-4 h-4" />
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                2
-              </span>
+              {totalCartCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-4 px-1 bg-red-600 text-white text-[10px] font-extrabold rounded-full flex items-center justify-center border-2 border-white shadow-xs animate-pulse">
+                  {totalCartCount}
+                </span>
+              )}
             </Link>
 
             {/* Hidden on small mobile, help direct trigger */}
@@ -425,6 +442,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
     { path: '/admin', label: 'Painel Geral', icon: <LayoutDashboard className="w-4 h-4" /> },
     { path: '/admin/produtos', label: 'Produtos', icon: <Sparkles className="w-4 h-4" /> },
     { path: '/admin/categorias', label: 'Categorias', icon: <FolderOpen className="w-4 h-4" /> },
+    { path: '/admin/acompanhamentos', label: 'Acompanhamentos', icon: <Layers className="w-4 h-4" /> },
     { path: '/admin/relatorios', label: 'Relatórios de Vendas', icon: <BarChart className="w-4 h-4" /> },
     { path: '/admin/usuarios', label: 'Equipe e Cargos', icon: <Users className="w-4 h-4" /> },
     { path: '/admin/configuracoes', label: 'Ajustes Estabelecimento', icon: <Settings className="w-4 h-4" /> },

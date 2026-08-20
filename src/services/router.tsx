@@ -40,6 +40,7 @@ export const routeConfig: RouteConfig[] = [
   { path: '/admin', label: 'Painel Administrativo', area: 'admin', layout: 'admin' },
   { path: '/admin/produtos', label: 'Gerenciar Produtos', area: 'admin', layout: 'admin', parentPath: '/admin' },
   { path: '/admin/categorias', label: 'Gerenciar Categorias', area: 'admin', layout: 'admin', parentPath: '/admin' },
+  { path: '/admin/acompanhamentos', label: 'Acompanhamentos e Adicionais', area: 'admin', layout: 'admin', parentPath: '/admin' },
   { path: '/admin/relatorios', label: 'Relatórios de Vendas', area: 'admin', layout: 'admin', parentPath: '/admin' },
   { path: '/admin/usuarios', label: 'Equipe e Cargos', area: 'admin', layout: 'admin', parentPath: '/admin' },
   { path: '/admin/configuracoes', label: 'Ajustes do Sistema', area: 'admin', layout: 'admin', parentPath: '/admin' },

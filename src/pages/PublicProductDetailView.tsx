@@ -17,10 +17,16 @@ import {
   Check
 } from 'lucide-react';
 import { useRouter } from '../services/router';
-import { productsRepository, categoriesRepository } from '../services/storage';
-import { Product, Category, ProductOption, ProductAddon } from '../services/storage/types';
+import { productsRepository, categoriesRepository, getAccompanimentGroupsForProduct } from '../services/storage';
+import { Product, Category, ProductOption, ProductAddon, AccompanimentGroup, AccompanimentItem } from '../services/storage/types';
 import { formatCentsToBRL } from '../utils/currency';
 import { cartService, CartItemOption, CartItemAddon } from '../services/cartService';
+import {
+  validateAccompanimentSelections,
+  buildOrderItemAccompaniments,
+  calculateTotalAccompanimentsPrice
+} from '../services/accompanimentService';
+import { AccompanimentSelector, AccompanimentGroupWithItems } from '../components/accompaniments/AccompanimentSelector';
 import { Card } from '../components/ui/DataDisplay';
 import { Button } from '../components/ui/Button';
 
@@ -30,6 +36,7 @@ export function PublicProductDetailView() {
 
   const [product, setProduct] = useState<Product | null>(null);
   const [category, setCategory] = useState<Category | null>(null);
+  const [accompanimentGroups, setAccompanimentGroups] = useState<AccompanimentGroupWithItems[]>([]);
   const [options, setOptions] = useState<ProductOption[]>([]);
   const [addons, setAddons] = useState<ProductAddon[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,10 +44,12 @@ export function PublicProductDetailView() {
   // User Selections
   const [quantity, setQuantity] = useState(1);
   const [notes, setNotes] = useState('');
+  const [selectedAccompaniments, setSelectedAccompaniments] = useState<Record<string, Record<string, number>>>({});
   const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>({}); // optionId -> choiceId
   const [selectedAddons, setSelectedAddons] = useState<Record<string, number>>({}); // addonId -> quantity
 
   const [addedSuccess, setAddedSuccess] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   // Load product from IndexedDB by ID
   useEffect(() => {
@@ -52,17 +61,28 @@ export function PublicProductDetailView() {
         if (prod) {
           setProduct(prod);
 
-          const [cat, opts, adds] = await Promise.all([
+          const [cat, accGroups, opts, adds] = await Promise.all([
             categoriesRepository.getById(prod.categoryId),
+            getAccompanimentGroupsForProduct(prod.id),
             productsRepository.getOptions(prod.id),
             productsRepository.getAddons(prod.id)
           ]);
 
           setCategory(cat);
+          setAccompanimentGroups(accGroups);
           setOptions(opts);
           setAddons(adds);
 
-          // Pre-select first choice for required options
+          // Pre-select first choice for single-choice required accompaniment groups
+          const initialAccSelections: Record<string, Record<string, number>> = {};
+          accGroups.forEach(({ group, items }) => {
+            if (group.required && group.maxSelections === 1 && items.length > 0) {
+              initialAccSelections[group.id] = { [items[0].id]: 1 };
+            }
+          });
+          setSelectedAccompaniments(initialAccSelections);
+
+          // Pre-select first choice for legacy required options
           const initialChoices: Record<string, string> = {};
           opts.forEach((opt) => {
             if (opt.required && opt.choices.length > 0) {
@@ -81,12 +101,21 @@ export function PublicProductDetailView() {
     loadProductDetail();
   }, [productId]);
 
-  // Calculate Unit Total in Cents (Base Price + Additional Prices from choices + addons)
+  // Extract flat lists for service computations
+  const allGroups = useMemo(() => accompanimentGroups.map(g => g.group), [accompanimentGroups]);
+  const allAccItems = useMemo(() => accompanimentGroups.flatMap(g => g.items), [accompanimentGroups]);
+
+  // Real-time accompaniments price calculation in cents
+  const accompanimentsPriceCents = useMemo(() => {
+    return calculateTotalAccompanimentsPrice(allGroups, allAccItems, selectedAccompaniments);
+  }, [allGroups, allAccItems, selectedAccompaniments]);
+
+  // Calculate Unit Total in Cents (Base Price + Accompaniments + Legacy Choices + Addons)
   const unitTotalCents = useMemo(() => {
     if (!product) return 0;
-    let total = product.price;
+    let total = product.price + accompanimentsPriceCents;
 
-    // Add option choice additional prices
+    // Add legacy option choice additional prices
     options.forEach((opt) => {
       const selectedChoiceId = selectedChoices[opt.id];
       if (selectedChoiceId) {
@@ -97,7 +126,7 @@ export function PublicProductDetailView() {
       }
     });
 
-    // Add selected addons prices
+    // Add legacy selected addons prices
     addons.forEach((add) => {
       const qty = selectedAddons[add.id] || 0;
       if (qty > 0) {
@@ -106,11 +135,16 @@ export function PublicProductDetailView() {
     });
 
     return total;
-  }, [product, options, addons, selectedChoices, selectedAddons]);
+  }, [product, accompanimentsPriceCents, options, addons, selectedChoices, selectedAddons]);
 
   const itemTotalCents = useMemo(() => {
     return unitTotalCents * quantity;
   }, [unitTotalCents, quantity]);
+
+  // Validation
+  const validationResult = useMemo(() => {
+    return validateAccompanimentSelections(allGroups, allAccItems, selectedAccompaniments);
+  }, [allGroups, allAccItems, selectedAccompaniments]);
 
   const handleChoiceSelect = (optionId: string, choiceId: string) => {
     setSelectedChoices((prev) => ({
@@ -131,6 +165,20 @@ export function PublicProductDetailView() {
 
   const handleAddToCart = () => {
     if (!product || !product.available || !product.active) return;
+
+    // Validate accompaniments
+    if (!validationResult.valid) {
+      setValidationError(validationResult.errors[0]?.message || 'Por favor, verifique as opções obrigatórias selecionadas.');
+      return;
+    }
+    setValidationError(null);
+
+    // Build accompaniments snapshots
+    const formattedAccompaniments = buildOrderItemAccompaniments(
+      allGroups,
+      allAccItems,
+      selectedAccompaniments
+    );
 
     // Format selected options snapshot
     const formattedOptions: CartItemOption[] = [];
@@ -167,9 +215,10 @@ export function PublicProductDetailView() {
     cartService.addItem({
       productId: product.id,
       productNameSnapshot: product.name,
-      unitPriceSnapshot: unitTotalCents,
+      unitPriceSnapshot: product.price,
       quantity,
       notes: notes.trim() || undefined,
+      selectedAccompaniments: formattedAccompaniments.length > 0 ? formattedAccompaniments : undefined,
       selectedOptions: formattedOptions.length > 0 ? formattedOptions : undefined,
       selectedAddons: formattedAddons.length > 0 ? formattedAddons : undefined
     });
@@ -274,6 +323,17 @@ export function PublicProductDetailView() {
           </div>
         </div>
 
+        {/* Accompaniments Groups */}
+        {accompanimentGroups.length > 0 && (
+          <div className="pt-4 border-t border-slate-100 flex flex-col gap-3" id="product-accompaniments-section">
+            <AccompanimentSelector
+              groupsWithItems={accompanimentGroups}
+              selectedItems={selectedAccompaniments}
+              onChange={setSelectedAccompaniments}
+            />
+          </div>
+        )}
+
         {/* Product Options (e.g., Ponto da Carne, Tamanho) */}
         {options.map((opt) => (
           <div key={opt.id} className="pt-4 border-t border-slate-100 flex flex-col gap-2">
@@ -374,7 +434,13 @@ export function PublicProductDetailView() {
       </Card>
 
       {/* Floating Bottom Add Bar */}
-      <div className="fixed bottom-4 left-4 right-4 max-w-xl mx-auto z-40">
+      <div className="fixed bottom-4 left-4 right-4 max-w-xl mx-auto z-40 flex flex-col gap-2">
+        {validationError && (
+          <div className="bg-amber-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg flex items-center gap-2 animate-bounce">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{validationError}</span>
+          </div>
+        )}
         <div className="bg-white p-4 rounded-2xl shadow-2xl border border-slate-200 flex items-center justify-between gap-4">
           {/* Quantity Selector */}
           <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200">

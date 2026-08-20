@@ -62,7 +62,7 @@ export function PublicCartView() {
     const unsubscribe = cartService.subscribe(() => {
       setCart(cartService.getCart());
     });
-    return unsubscribe;
+    return () => unsubscribe();
   }, []);
 
   const handleUpdateQuantity = (itemId: string, delta: number) => {
@@ -152,11 +152,12 @@ export function PublicCartView() {
         orderId: '',
         productId: item.productId,
         productNameSnapshot: item.productNameSnapshot,
-        unitPrice: item.unitPriceSnapshot,
+        unitPrice: item.quantity > 0 ? Math.round(item.subtotal / item.quantity) : item.unitPriceSnapshot,
         quantity: item.quantity,
         subtotal: item.subtotal,
         notes: item.notes,
         status: 'PENDING',
+        selectedAccompaniments: item.selectedAccompaniments,
         selectedOptions: item.selectedOptions?.map(o => ({
           optionId: o.optionId,
           optionName: o.optionName,
@@ -309,8 +310,8 @@ export function PublicCartView() {
                   <div className="flex justify-between items-start gap-3">
                     <div className="flex flex-col">
                       <h3 className="text-sm font-extrabold text-slate-950">{item.productNameSnapshot}</h3>
-                      <span className="text-xs font-extrabold text-amber-700 mt-0.5">
-                        {formatCentsToBRL(item.unitPriceSnapshot)}
+                      <span className="text-xs font-semibold text-slate-500 mt-0.5">
+                        Preço base: {formatCentsToBRL(item.unitPriceSnapshot)}
                       </span>
                     </div>
 
@@ -324,20 +325,44 @@ export function PublicCartView() {
                     </button>
                   </div>
 
-                  {/* Options & Addons List */}
-                  {((item.selectedOptions && item.selectedOptions.length > 0) ||
+                  {/* Accompaniments, Options & Addons List */}
+                  {((item.selectedAccompaniments && item.selectedAccompaniments.length > 0) ||
+                    (item.selectedOptions && item.selectedOptions.length > 0) ||
                     (item.selectedAddons && item.selectedAddons.length > 0)) && (
-                    <div className="text-[11px] text-slate-500 bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex flex-col gap-1">
+                    <div className="text-[11px] text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex flex-col gap-1.5">
+                      {item.selectedAccompaniments && item.selectedAccompaniments.length > 0 && (
+                        <div className="flex flex-col gap-1">
+                          <span className="font-bold text-[11px] text-slate-700">Acompanhamentos:</span>
+                          {item.selectedAccompaniments.map((acc, idx) => {
+                            const accPrice = acc.priceSnapshot;
+                            return (
+                              <div key={idx} className="flex items-center justify-between font-medium pl-2 text-slate-600">
+                                <span>+ {acc.quantity}x {acc.itemName || acc.itemNameSnapshot}</span>
+                                {accPrice > 0 ? (
+                                  <span className="text-amber-800 font-bold">+{formatCentsToBRL(accPrice * acc.quantity)}</span>
+                                ) : (
+                                  <span className="text-emerald-600 font-bold">Grátis</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                       {item.selectedOptions?.map((opt, idx) => (
-                        <span key={idx} className="font-medium">
-                          • {opt.optionName}: <strong>{opt.choiceName}</strong>
-                          {opt.additionalPrice > 0 ? ` (+${formatCentsToBRL(opt.additionalPrice)})` : ''}
-                        </span>
+                        <div key={idx} className="flex items-center justify-between font-medium pl-1 text-slate-600">
+                          <span>• {opt.optionName}: <strong>{opt.choiceName}</strong></span>
+                          {opt.additionalPrice > 0 && (
+                            <span className="text-amber-800 font-bold">+{formatCentsToBRL(opt.additionalPrice)}</span>
+                          )}
+                        </div>
                       ))}
                       {item.selectedAddons?.map((add, idx) => (
-                        <span key={idx} className="font-medium">
-                          • Adicional: <strong>{add.addonName}</strong> ({add.quantity}x) (+{formatCentsToBRL(add.price)})
-                        </span>
+                        <div key={idx} className="flex items-center justify-between font-medium pl-1 text-slate-600">
+                          <span>• Adicional: <strong>{add.addonName}</strong> ({add.quantity}x)</span>
+                          {add.price > 0 && (
+                            <span className="text-amber-800 font-bold">+{formatCentsToBRL(add.price * add.quantity)}</span>
+                          )}
+                        </div>
                       ))}
                     </div>
                   )}
@@ -368,9 +393,14 @@ export function PublicCartView() {
                       </button>
                     </div>
 
-                    <span className="text-sm font-black text-slate-950">
-                      Subtotal: {formatCentsToBRL(item.subtotal)}
-                    </span>
+                    <div className="flex flex-col items-end">
+                      <span className="text-[11px] text-slate-500 font-semibold">
+                        Valor unitário: {formatCentsToBRL(Math.round(item.subtotal / item.quantity))}
+                      </span>
+                      <span className="text-sm font-black text-slate-950">
+                        Subtotal: {formatCentsToBRL(item.subtotal)}
+                      </span>
+                    </div>
                   </div>
                 </Card>
               ))}

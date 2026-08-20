@@ -827,6 +827,48 @@ export function PedidosView() {
                                     <span>{formatCentsToBRL(item.subtotal)}</span>
                                   </div>
 
+                                  {/* Accompaniments Snapshot */}
+                                  {item.selectedAccompaniments && item.selectedAccompaniments.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-0.5">
+                                      {item.selectedAccompaniments.map((acc, aIdx) => (
+                                        <span
+                                          key={aIdx}
+                                          className="text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.2 rounded"
+                                        >
+                                          +{acc.quantity}x {acc.itemName}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {/* Options Snapshot */}
+                                  {item.selectedOptions && item.selectedOptions.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-0.5">
+                                      {item.selectedOptions.map((opt, oIdx) => (
+                                        <span
+                                          key={oIdx}
+                                          className="text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200 px-1.5 py-0.2 rounded"
+                                        >
+                                          {opt.optionName}: {opt.choiceName}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {/* Addons Snapshot */}
+                                  {item.selectedAddons && item.selectedAddons.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-0.5">
+                                      {item.selectedAddons.map((add, dIdx) => (
+                                        <span
+                                          key={dIdx}
+                                          className="text-[10px] font-bold bg-emerald-50 text-emerald-900 border border-emerald-200 px-1.5 py-0.2 rounded"
+                                        >
+                                          +{add.quantity}x {add.addonName}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+
                                   {item.notes && (
                                     <p className="text-[11px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded font-medium">
                                       Obs: {item.notes}

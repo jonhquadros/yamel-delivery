@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Utensils,
   Plus,
@@ -49,7 +49,8 @@ import {
   Product,
   Category,
   TableStatus,
-  PaymentMethod
+  PaymentMethod,
+  OrderItemAccompaniment
 } from '../services/storage/types';
 import {
   tablesRepository,
@@ -57,7 +58,8 @@ import {
   productsRepository,
   categoriesRepository,
   cashRepository,
-  getOrRegisterDeviceId
+  getOrRegisterDeviceId,
+  getAccompanimentGroupsForProduct
 } from '../services/storage';
 import {
   addProductToTableComanda,
@@ -70,6 +72,12 @@ import {
   cancelTableComanda,
   sendRoundToPreparation
 } from '../services/orderService';
+import {
+  validateAccompanimentSelections,
+  buildOrderItemAccompaniments,
+  calculateTotalAccompanimentsPrice
+} from '../services/accompanimentService';
+import { AccompanimentSelector, AccompanimentGroupWithItems } from '../components/accompaniments/AccompanimentSelector';
 
 export interface StagedItem {
   id: string;
@@ -78,6 +86,7 @@ export interface StagedItem {
   unitPrice: number;
   quantity: number;
   notes: string;
+  selectedAccompaniments?: OrderItemAccompaniment[];
 }
 
 export function MesasView() {
@@ -114,12 +123,50 @@ export function MesasView() {
   const [productCategoryFilter, setProductCategoryFilter] = useState<string>('ALL');
   const [productSearchQuery, setProductSearchQuery] = useState<string>('');
   const [selectedProductId, setSelectedProductId] = useState<string>('');
+  const [productAccompaniments, setProductAccompaniments] = useState<AccompanimentGroupWithItems[]>([]);
+  const [selectedAccompaniments, setSelectedAccompaniments] = useState<Record<string, Record<string, number>>>({});
   const [quantity, setQuantity] = useState<number>(1);
   const [itemNotes, setItemNotes] = useState<string>('');
   const [stagedItems, setStagedItems] = useState<StagedItem[]>([]);
   const [isSubmittingItem, setIsSubmittingItem] = useState<boolean>(false);
   const [addItemError, setAddItemError] = useState<string | null>(null);
   const [sendingRoundId, setSendingRoundId] = useState<string | null>(null);
+
+  // Load accompaniments whenever selected product in comanda modal changes
+  useEffect(() => {
+    if (!selectedProductId || !isAddItemOpen) {
+      setProductAccompaniments([]);
+      setSelectedAccompaniments({});
+      return;
+    }
+
+    let isMounted = true;
+    getAccompanimentGroupsForProduct(selectedProductId)
+      .then(groupsWithItems => {
+        if (!isMounted) return;
+        setProductAccompaniments(groupsWithItems);
+
+        // Pre-select required single-choice groups
+        const initialSelections: Record<string, Record<string, number>> = {};
+        groupsWithItems.forEach(({ group, items }) => {
+          if (group.required && group.maxSelections === 1 && items.length > 0) {
+            initialSelections[group.id] = { [items[0].id]: 1 };
+          }
+        });
+        setSelectedAccompaniments(initialSelections);
+      })
+      .catch(err => {
+        console.error('Erro ao carregar acompanhamentos do produto na mesa:', err);
+        if (isMounted) {
+          setProductAccompaniments([]);
+          setSelectedAccompaniments({});
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedProductId, isAddItemOpen]);
 
   const handleSendRoundToPreparo = async (roundId: string) => {
     if (!selectedOrder || sendingRoundId === roundId) return;
@@ -318,28 +365,53 @@ export function MesasView() {
     setIsAddItemOpen(true);
   };
 
+  // Extract flat lists for accompaniment calculations
+  const selectedProduct = products.find(p => p.id === selectedProductId);
+  const modalAccGroups = useMemo(() => productAccompaniments.map(g => g.group), [productAccompaniments]);
+  const modalAccItems = useMemo(() => productAccompaniments.flatMap(g => g.items), [productAccompaniments]);
+
+  // Real-time accompaniments price calculation in cents
+  const modalAccompanimentsPriceCents = useMemo(() => {
+    return calculateTotalAccompanimentsPrice(modalAccGroups, modalAccItems, selectedAccompaniments);
+  }, [modalAccGroups, modalAccItems, selectedAccompaniments]);
+
+  const effectiveUnitPriceCents = useMemo(() => {
+    return (selectedProduct?.price || 0) + modalAccompanimentsPriceCents;
+  }, [selectedProduct, modalAccompanimentsPriceCents]);
+
   const handleAddStagedItem = (product: Product) => {
     if (!product || quantity <= 0) return;
-    setStagedItems(prev => {
-      const cleanNotes = itemNotes.trim();
-      const existingIdx = prev.findIndex(item => item.productId === product.id && item.notes === cleanNotes);
-      if (existingIdx >= 0) {
-        const next = [...prev];
-        next[existingIdx] = {
-          ...next[existingIdx],
-          quantity: next[existingIdx].quantity + quantity,
-        };
-        return next;
+
+    // Validate accompaniments
+    if (modalAccGroups.length > 0) {
+      const validation = validateAccompanimentSelections(modalAccGroups, modalAccItems, selectedAccompaniments);
+      if (!validation.valid) {
+        setAddItemError(validation.errors[0]?.message || 'Verifique as opções obrigatórias de acompanhamento.');
+        return;
       }
+    }
+    setAddItemError(null);
+
+    const formattedAccompaniments = buildOrderItemAccompaniments(
+      modalAccGroups,
+      modalAccItems,
+      selectedAccompaniments
+    );
+
+    const calculatedUnitPrice = product.price + modalAccompanimentsPriceCents;
+    const cleanNotes = itemNotes.trim();
+
+    setStagedItems(prev => {
       return [
         ...prev,
         {
           id: `staged-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           productId: product.id,
           productName: product.name,
-          unitPrice: product.price,
+          unitPrice: calculatedUnitPrice,
           quantity: quantity,
           notes: cleanNotes,
+          selectedAccompaniments: formattedAccompaniments.length > 0 ? formattedAccompaniments : undefined,
         },
       ];
     });
@@ -350,7 +422,7 @@ export function MesasView() {
   const handleAddProductQuickly = (product: Product) => {
     if (!product) return;
     setStagedItems(prev => {
-      const existingIdx = prev.findIndex(item => item.productId === product.id && !item.notes);
+      const existingIdx = prev.findIndex(item => item.productId === product.id && !item.notes && !item.selectedAccompaniments);
       if (existingIdx >= 0) {
         const next = [...prev];
         next[existingIdx] = {
@@ -407,6 +479,8 @@ export function MesasView() {
             productId: item.productId,
             quantity: item.quantity,
             notes: item.notes,
+            selectedAccompaniments: item.selectedAccompaniments,
+            unitPriceOverride: item.unitPrice,
           })),
         });
         setSelectedOrder(result.order);
@@ -798,7 +872,6 @@ export function MesasView() {
     }
   };
 
-  const selectedProduct = products.find(p => p.id === selectedProductId);
   const activeOrderItems = (selectedOrder?.items || []).filter(i => i.status !== 'CANCELLED');
   const cancelledOrderItems = (selectedOrder?.items || []).filter(i => i.status === 'CANCELLED');
 
@@ -1610,9 +1683,20 @@ export function MesasView() {
                     {selectedProduct?.name || 'Selecione um produto'}
                   </span>
                   <span className="text-xs font-extrabold text-amber-600">
-                    {selectedProduct ? formatCentsToBRL(selectedProduct.price) : 'R$ 0,00'}
+                    {selectedProduct ? formatCentsToBRL(effectiveUnitPriceCents) : 'R$ 0,00'}
                   </span>
                 </div>
+
+                {/* Accompaniments Selector if product has any */}
+                {productAccompaniments.length > 0 && (
+                  <div className="max-h-52 overflow-y-auto pr-1 border-t border-b border-slate-100 py-2">
+                    <AccompanimentSelector
+                      groupsWithItems={productAccompaniments}
+                      selectedItems={selectedAccompaniments}
+                      onChange={setSelectedAccompaniments}
+                    />
+                  </div>
+                )}
 
                 <div className="grid grid-cols-3 gap-2">
                   <div>
@@ -1693,6 +1777,15 @@ export function MesasView() {
                           <span className="text-xs font-bold text-slate-800 truncate block">
                             {staged.productName}
                           </span>
+                          {staged.selectedAccompaniments && staged.selectedAccompaniments.length > 0 && (
+                            <div className="text-[10px] text-amber-700 flex flex-wrap gap-1 mt-0.5">
+                              {staged.selectedAccompaniments.map((acc, i) => (
+                                <span key={i} className="bg-amber-50 px-1 py-0.2 rounded border border-amber-200">
+                                  +{acc.quantity}x {acc.itemName}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                           {staged.notes && (
                             <p className="text-[10px] text-slate-500 italic truncate">Obs: {staged.notes}</p>
                           )}

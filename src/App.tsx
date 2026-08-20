@@ -17,6 +17,7 @@ import {
   PublicCartView,
   PublicOrderTrackerView
 } from './pages/CatalogViews';
+import { AdminAcompanhamentosView } from './pages/AdminAcompanhamentosView';
 import { RelatoriosView, UsuariosView, ConfiguracoesView, NotFoundView } from './pages/ManagementViews';
 
 function AppContent() {
@@ -70,6 +71,9 @@ function AppContent() {
     }
     if (path === '/admin/categorias') {
       return <CategoriasView />;
+    }
+    if (path === '/admin/acompanhamentos') {
+      return <AdminAcompanhamentosView />;
     }
     if (path === '/admin/relatorios') {
       return <RelatoriosView />;

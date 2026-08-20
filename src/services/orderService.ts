@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Order, OrderStatus, OrderOrigin, PaymentStatus, OrderItem, OrderCustomerSnapshot, OrderDeliverySnapshot, PaymentMethod, Table, ProductionTicket } from './storage/types';
+import { Order, OrderStatus, OrderOrigin, PaymentStatus, OrderItem, OrderItemOption, OrderItemAddon, OrderItemAccompaniment, OrderCustomerSnapshot, OrderDeliverySnapshot, PaymentMethod, Table, ProductionTicket } from './storage/types';
 import { ordersRepository, productionRepository, tablesRepository, cashRepository, productsRepository, syncQueueRepository, getOrRegisterDeviceId, generateLocalId } from './storage';
 import { localDB } from './storage/idb';
 import { formatCentsToBRL } from '../utils/currency';
@@ -894,12 +894,20 @@ export interface AddProductToComandaParams {
   productId: string;
   quantity: number;
   notes?: string;
+  selectedAccompaniments?: OrderItemAccompaniment[];
+  selectedOptions?: OrderItemOption[];
+  selectedAddons?: OrderItemAddon[];
+  unitPriceOverride?: number;
 }
 
 export interface BatchProductInput {
   productId: string;
   quantity: number;
   notes?: string;
+  selectedAccompaniments?: OrderItemAccompaniment[];
+  selectedOptions?: OrderItemOption[];
+  selectedAddons?: OrderItemAddon[];
+  unitPriceOverride?: number;
 }
 
 export interface AddBatchProductsToComandaParams {
@@ -976,7 +984,24 @@ export async function addBatchProductsToTableComanda(
       throw new Error(`O produto "${product.name}" está inativo.`);
     }
 
-    const unitPrice = Math.round(product.price);
+    // Calcula unitPrice incluindo adicionais e acompanhamentos
+    const accTotal = (itemInput.selectedAccompaniments || []).reduce(
+      (acc, a) => acc + (a.subtotal !== undefined ? a.subtotal : a.priceSnapshot * a.quantity),
+      0
+    );
+    const optTotal = (itemInput.selectedOptions || []).reduce(
+      (acc, o) => acc + (o.additionalPrice || 0),
+      0
+    );
+    const addTotal = (itemInput.selectedAddons || []).reduce(
+      (acc, a) => acc + (a.price * a.quantity),
+      0
+    );
+
+    const unitPrice = itemInput.unitPriceOverride !== undefined
+      ? Math.round(itemInput.unitPriceOverride)
+      : Math.round(product.price) + optTotal + addTotal + accTotal;
+
     const qty = Math.max(1, Math.round(itemInput.quantity));
     const subtotal = unitPrice * qty;
 
@@ -990,6 +1015,9 @@ export async function addBatchProductsToTableComanda(
       subtotal,
       notes: itemInput.notes?.trim() || undefined,
       status: 'PENDING',
+      selectedAccompaniments: itemInput.selectedAccompaniments,
+      selectedOptions: itemInput.selectedOptions,
+      selectedAddons: itemInput.selectedAddons,
       roundNumber: nextRoundNumber,
       roundId: nextRoundId,
       createdAt: now,
@@ -1042,7 +1070,7 @@ export async function addBatchProductsToTableComanda(
 export async function addProductToTableComanda(
   params: AddProductToComandaParams
 ): Promise<{ order: Order; item: OrderItem }> {
-  const { tableId, orderId, productId, quantity, notes } = params;
+  const { tableId, orderId, productId, quantity, notes, selectedAccompaniments, selectedOptions, selectedAddons, unitPriceOverride } = params;
 
   const result = await addBatchProductsToTableComanda({
     tableId,
@@ -1052,11 +1080,18 @@ export async function addProductToTableComanda(
         productId,
         quantity,
         notes,
+        selectedAccompaniments,
+        selectedOptions,
+        selectedAddons,
+        unitPriceOverride
       },
     ],
   });
 
-  return { order: result.order, item: result.items[0] };
+  return {
+    order: result.order,
+    item: result.items[0],
+  };
 }
 
 /**

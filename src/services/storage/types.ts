@@ -13,6 +13,9 @@ export type SyncEntityName =
   | 'user'
   | 'category'
   | 'product'
+  | 'accompaniment_group'
+  | 'accompaniment_item'
+  | 'product_accompaniment_link'
   | 'table'
   | 'customer'
   | 'order'
@@ -117,8 +120,54 @@ export interface Product extends Auditable {
   deviceId: string;
 }
 
-// --- 5. PRODUCT OPTIONS & ADDONS ---
-// Flexibility for Hambúrguer, Pizza, Tapioca, Café, etc.
+// --- 5. ACCOMPANIMENTS & MODIFIERS (MÓDULO CENTRAL DE ACOMPANHAMENTOS) ---
+export type AccompanimentScope = 'GLOBAL' | 'PRODUCT' | 'CATEGORY';
+
+export interface AccompanimentGroup extends Auditable {
+  id: string; // UUID
+  name: string; // e.g. "Ponto da Carne", "Turbine seu Hambúrguer", "Molhos Especiais", "Tamanho"
+  description?: string;
+  minSelections: number; // 0 for optional, >= 1 for required
+  maxSelections: number; // Max allowed items selected in total in this group
+  freeSelections?: number; // Number of items that can be chosen for free before charging
+  required: boolean;
+  allowRepeated: boolean; // Allow selecting multiple of the same item (e.g., 2x Queijo Extra)
+  active: boolean;
+  sortOrder: number;
+  scope: AccompanimentScope; // GLOBAL, PRODUCT, CATEGORY
+  categoryId?: string; // Linked category if scope === 'CATEGORY' (Primary/Fallback)
+  categoryIds?: string[]; // Array of linked category IDs for multi-category inheritance
+  companyId?: string;
+}
+
+export interface AccompanimentItem extends Auditable {
+  id: string; // UUID
+  groupId: string; // Refers to AccompanimentGroup.id
+  name: string; // e.g. "Bacon Crocante", "Queijo Cheddar", "Ao Ponto"
+  description?: string;
+  price: number; // Integer representing CENTS (e.g. 350 -> R$ 3,50, 0 if free)
+  cost?: number; // Integer representing CENTS
+  maxQuantity?: number; // Max units of this specific item allowed (if allowRepeated)
+  active: boolean;
+  available: boolean;
+  sortOrder: number;
+  productionStation?: ProductionStationType;
+}
+
+export interface ProductAccompanimentLink {
+  id: string; // UUID
+  productId: string;
+  groupId: string;
+  sortOrder: number;
+  minSelectionsOverride?: number;
+  maxSelectionsOverride?: number;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// --- BACKWARD COMPATIBILITY ALIASES FOR OPTIONS & ADDONS ---
+// Flexibility for legacy code referencing ProductOption and ProductAddon
 export interface ProductOption {
   id: string;
   productId: string;
@@ -183,6 +232,17 @@ export type PaymentStatus = 'PENDING' | 'PARTIAL' | 'PAID' | 'REFUNDED' | 'CANCE
 
 export type PaymentMethod = 'CASH' | 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD' | 'MEAL_VOUCHER' | 'OTHER';
 
+export interface OrderItemAccompaniment {
+  groupId: string;
+  groupNameSnapshot: string;
+  itemId: string;
+  itemNameSnapshot: string;
+  priceSnapshot: number; // Integer in CENTS
+  quantity: number;
+  subtotal: number; // Integer in CENTS (priceSnapshot * quantity or excess price calculation)
+  productionStation?: ProductionStationType;
+}
+
 export interface OrderItemOption {
   optionId: string;
   optionName: string;
@@ -205,9 +265,10 @@ export interface OrderItem {
   productNameSnapshot: string; // Frozen snapshot of the product's name
   unitPrice: number; // Frozen price in CENTS
   quantity: number;
-  subtotal: number; // Frozen item total in CENTS (unitPrice * quantity + addons/options)
+  subtotal: number; // Frozen item total in CENTS (unitPrice * quantity + addons/options/accompaniments)
   notes?: string;
   status: 'PENDING' | 'PREPARING' | 'READY' | 'DELIVERED' | 'CANCELLED';
+  selectedAccompaniments?: OrderItemAccompaniment[];
   selectedOptions?: OrderItemOption[];
   selectedAddons?: OrderItemAddon[];
   roundNumber?: number; // Sequential batch/round number (e.g. 1, 2, 3)
@@ -398,6 +459,9 @@ export interface ProductionItem {
   quantity: number;
   notes?: string;
   status: ProductionStatus;
+  selectedAccompaniments?: OrderItemAccompaniment[];
+  selectedOptions?: OrderItemOption[];
+  selectedAddons?: OrderItemAddon[];
   roundNumber?: number;
   roundId?: string;
   createdAt: string;

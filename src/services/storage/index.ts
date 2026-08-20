@@ -15,12 +15,16 @@ import {
   Product,
   ProductOption,
   ProductAddon,
+  AccompanimentGroup,
+  AccompanimentItem,
+  ProductAccompanimentLink,
   Table,
   Customer,
   Order,
   OrderItem,
   OrderItemOption,
   OrderItemAddon,
+  OrderItemAccompaniment,
   CashRegister,
   CashRegisterClosingCounts,
   CashMovement,
@@ -43,8 +47,326 @@ import {
   ProductionTicket
 } from './types';
 
+// --- SEED ACCOMPANIMENTS HELPER ---
+export async function seedAccompanimentsIfNeeded(): Promise<void> {
+  const existingGroups = await localDB.getAll<AccompanimentGroup>('accompaniment_groups');
+  if (existingGroups.length > 0) {
+    // Migration check: Ensure grp-3 (Molhos Especiais da Casa) is linked only to cat-2 (Porções e Acompanhamentos)
+    const grp3 = existingGroups.find(g => g.id === 'grp-3');
+    if (grp3 && grp3.categoryIds?.includes('cat-1')) {
+      const updatedCatIds = grp3.categoryIds.filter(c => c !== 'cat-1');
+      grp3.categoryIds = updatedCatIds.length > 0 ? updatedCatIds : ['cat-2'];
+      if (grp3.categoryId === 'cat-1') grp3.categoryId = 'cat-2';
+      await localDB.put('accompaniment_groups', grp3);
+    }
+    return;
+  }
+
+  const now = new Date().toISOString();
+
+  // 1. Grupos de Acompanhamento
+  const seedGroups: AccompanimentGroup[] = [
+    {
+      id: 'grp-1',
+      name: 'Ponto da Carne',
+      description: 'Escolha o ponto de preparo do seu hambúrguer artesanal',
+      minSelections: 1,
+      maxSelections: 1,
+      freeSelections: 0,
+      required: true,
+      allowRepeated: false,
+      active: true,
+      sortOrder: 1,
+      scope: 'CATEGORY',
+      categoryId: 'cat-1',
+      categoryIds: ['cat-1'],
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'grp-2',
+      name: 'Turbine seu Hambúrguer (Adicionais)',
+      description: 'Turbine seu lanche com ingredientes premium selecionados',
+      minSelections: 0,
+      maxSelections: 6,
+      freeSelections: 0,
+      required: false,
+      allowRepeated: true,
+      active: true,
+      sortOrder: 2,
+      scope: 'CATEGORY',
+      categoryId: 'cat-1',
+      categoryIds: ['cat-1', 'cat-2'],
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'grp-3',
+      name: 'Molhos Especiais da Casa',
+      description: 'Escolha seus molhos artesanais (1ª opção inclusa gratuitamente!)',
+      minSelections: 0,
+      maxSelections: 3,
+      freeSelections: 1,
+      required: false,
+      allowRepeated: false,
+      active: true,
+      sortOrder: 3,
+      scope: 'CATEGORY',
+      categoryId: 'cat-2',
+      categoryIds: ['cat-2'],
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'grp-4',
+      name: 'Opções de Serviço da Bebida',
+      description: 'Preferências de serviço para sua bebida',
+      minSelections: 0,
+      maxSelections: 1,
+      freeSelections: 0,
+      required: false,
+      allowRepeated: false,
+      active: true,
+      sortOrder: 4,
+      scope: 'CATEGORY',
+      categoryId: 'cat-3',
+      categoryIds: ['cat-3'],
+      createdAt: now,
+      updatedAt: now
+    }
+  ];
+
+  for (const grp of seedGroups) {
+    await localDB.put('accompaniment_groups', grp);
+  }
+
+  // 2. Itens dos Grupos
+  const seedItems: AccompanimentItem[] = [
+    // Ponto da Carne
+    {
+      id: 'item-1-1',
+      groupId: 'grp-1',
+      name: 'Mal Passado (Carne bem suculenta e vermelha no centro)',
+      description: 'Selado por fora e centro bem rosado',
+      price: 0,
+      cost: 0,
+      active: true,
+      available: true,
+      sortOrder: 1,
+      productionStation: 'KITCHEN',
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'item-1-2',
+      groupId: 'grp-1',
+      name: 'Ao Ponto (Padrão da Casa - Centro rosado e macio)',
+      description: 'Ponto ideal de maciez e suculência',
+      price: 0,
+      cost: 0,
+      active: true,
+      available: true,
+      sortOrder: 2,
+      productionStation: 'KITCHEN',
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'item-1-3',
+      groupId: 'grp-1',
+      name: 'Bem Passado (Sem partes rosadas)',
+      description: 'Totalmente cozido e dourado',
+      price: 0,
+      cost: 0,
+      active: true,
+      available: true,
+      sortOrder: 3,
+      productionStation: 'KITCHEN',
+      createdAt: now,
+      updatedAt: now
+    },
+
+    // Turbine seu Hambúrguer
+    {
+      id: 'item-2-1',
+      groupId: 'grp-2',
+      name: 'Bacon Crocante Duplo (4 fatias)',
+      description: 'Bacon artesanal defumado em lenha de macieira',
+      price: 450, // R$ 4,50 in Cents
+      cost: 150,
+      maxQuantity: 3,
+      active: true,
+      available: true,
+      sortOrder: 1,
+      productionStation: 'KITCHEN',
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'item-2-2',
+      groupId: 'grp-2',
+      name: 'Queijo Cheddar Inglês Extra (Dupla fatia derretida)',
+      description: 'Cheddar legítimo cremoso',
+      price: 350, // R$ 3,50 in Cents
+      cost: 120,
+      maxQuantity: 3,
+      active: true,
+      available: true,
+      sortOrder: 2,
+      productionStation: 'KITCHEN',
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'item-2-3',
+      groupId: 'grp-2',
+      name: 'Cebola Caramelizada na Manteiga',
+      description: 'Cebola roxa puxada lentamente no açúcar mascavo e manteiga',
+      price: 300, // R$ 3,00 in Cents
+      cost: 90,
+      maxQuantity: 2,
+      active: true,
+      available: true,
+      sortOrder: 3,
+      productionStation: 'KITCHEN',
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'item-2-4',
+      groupId: 'grp-2',
+      name: 'Ovo Caipira Frito na Chapa',
+      description: 'Gema mole ou no ponto de sua preferência',
+      price: 250, // R$ 2,50 in Cents
+      cost: 70,
+      maxQuantity: 2,
+      active: true,
+      available: true,
+      sortOrder: 4,
+      productionStation: 'KITCHEN',
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'item-2-5',
+      groupId: 'grp-2',
+      name: 'Hambúrguer Blend 150g Extra',
+      description: 'Disco extra de carne 100% Angus moída no dia',
+      price: 990, // R$ 9,90 in Cents
+      cost: 380,
+      maxQuantity: 2,
+      active: true,
+      available: true,
+      sortOrder: 5,
+      productionStation: 'KITCHEN',
+      createdAt: now,
+      updatedAt: now
+    },
+
+    // Molhos Especiais da Casa
+    {
+      id: 'item-3-1',
+      groupId: 'grp-3',
+      name: 'Maionese Verde de Ervas Finas (50ml)',
+      description: 'Receita autoral fresca com manjericão e cebolinha',
+      price: 200, // R$ 2,00 in Cents
+      cost: 60,
+      maxQuantity: 3,
+      active: true,
+      available: true,
+      sortOrder: 1,
+      productionStation: 'KITCHEN',
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'item-3-2',
+      groupId: 'grp-3',
+      name: 'Barbecue Defumado com Toque de Goiabada (50ml)',
+      description: 'Agridoce leve e aroma amadeirado',
+      price: 250, // R$ 2,50 in Cents
+      cost: 80,
+      maxQuantity: 3,
+      active: true,
+      available: true,
+      sortOrder: 2,
+      productionStation: 'KITCHEN',
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'item-3-3',
+      groupId: 'grp-3',
+      name: 'Molho Especial Yamel Secreto (50ml)',
+      description: 'Molho cremoso a base de páprica e picles',
+      price: 200, // R$ 2,00 in Cents
+      cost: 60,
+      maxQuantity: 3,
+      active: true,
+      available: true,
+      sortOrder: 3,
+      productionStation: 'KITCHEN',
+      createdAt: now,
+      updatedAt: now
+    },
+
+    // Bebidas
+    {
+      id: 'item-4-1',
+      groupId: 'grp-4',
+      name: 'Com Gelo e Rodela de Limão',
+      description: 'Servido em copo com gelo e limão fresco',
+      price: 0,
+      cost: 0,
+      active: true,
+      available: true,
+      sortOrder: 1,
+      productionStation: 'BAR',
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'item-4-2',
+      groupId: 'grp-4',
+      name: 'Sem Gelo (Apenas a Lata Gelada)',
+      description: 'Bebida bem gelada sem adição de gelo',
+      price: 0,
+      cost: 0,
+      active: true,
+      available: true,
+      sortOrder: 2,
+      productionStation: 'BAR',
+      createdAt: now,
+      updatedAt: now
+    }
+  ];
+
+  for (const itm of seedItems) {
+    await localDB.put('accompaniment_items', itm);
+  }
+
+  // 3. Vínculos de Produtos com Grupos
+  const seedLinks: ProductAccompanimentLink[] = [
+    { id: 'link-1', productId: 'prod-1', groupId: 'grp-1', sortOrder: 1, active: true, createdAt: now, updatedAt: now },
+    { id: 'link-2', productId: 'prod-1', groupId: 'grp-2', sortOrder: 2, active: true, createdAt: now, updatedAt: now },
+    { id: 'link-3', productId: 'prod-1', groupId: 'grp-3', sortOrder: 3, active: true, createdAt: now, updatedAt: now },
+    { id: 'link-4', productId: 'prod-2', groupId: 'grp-1', sortOrder: 1, active: true, createdAt: now, updatedAt: now },
+    { id: 'link-5', productId: 'prod-2', groupId: 'grp-2', sortOrder: 2, active: true, createdAt: now, updatedAt: now },
+    { id: 'link-6', productId: 'prod-2', groupId: 'grp-3', sortOrder: 3, active: true, createdAt: now, updatedAt: now },
+    { id: 'link-7', productId: 'prod-4', groupId: 'grp-4', sortOrder: 1, active: true, createdAt: now, updatedAt: now },
+    { id: 'link-8', productId: 'prod-5', groupId: 'grp-4', sortOrder: 1, active: true, createdAt: now, updatedAt: now }
+  ];
+
+  for (const lnk of seedLinks) {
+    await localDB.put('product_accompaniment_links', lnk);
+  }
+}
+
 // --- SEED INITIAL DATA WITH CENTS-BASED MONETARY VALUES ---
 export async function seedInitialDataIfNeeded(): Promise<void> {
+  // Always verify if accompaniments need seeding
+  await seedAccompanimentsIfNeeded();
+
   const existingCompanies = await localDB.getAll<Company>('companies');
   if (existingCompanies.length > 0) {
     return; // Already seeded
@@ -515,6 +837,284 @@ export const productsRepository = {
   }
 };
 
+// --- 1.1 REPOSITÓRIO DE GRUPOS DE ACOMPANHAMENTOS ---
+export const accompanimentGroupsRepository = {
+  async getAll(): Promise<AccompanimentGroup[]> {
+    const list = await localDB.getAll<AccompanimentGroup>('accompaniment_groups');
+    return list
+      .filter(item => !item.deletedAt)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  },
+
+  async getById(id: string): Promise<AccompanimentGroup | null> {
+    const item = await localDB.get<AccompanimentGroup>('accompaniment_groups', id);
+    if (item && item.deletedAt) return null;
+    return item;
+  },
+
+  async save(group: AccompanimentGroup): Promise<void> {
+    const now = new Date().toISOString();
+    const isNew = !(await localDB.get('accompaniment_groups', group.id));
+
+    group.updatedAt = now;
+    if (isNew) {
+      group.createdAt = now;
+    }
+
+    await localDB.put('accompaniment_groups', group);
+
+    const devId = await getOrRegisterDeviceId();
+    await syncQueueRepository.enqueue(
+      'accompaniment_group',
+      group.id,
+      isNew ? 'CREATE' : 'UPDATE',
+      group,
+      devId
+    );
+  },
+
+  async delete(id: string): Promise<void> {
+    const group = await this.getById(id);
+    if (group) {
+      const now = new Date().toISOString();
+      group.deletedAt = now;
+      group.updatedAt = now;
+      await localDB.put('accompaniment_groups', group);
+
+      const devId = await getOrRegisterDeviceId();
+      await syncQueueRepository.enqueue(
+        'accompaniment_group',
+        id,
+        'DELETE',
+        { id, deletedAt: now },
+        devId
+      );
+    }
+  }
+};
+
+// --- 1.2 REPOSITÓRIO DE ITENS DE ACOMPANHAMENTO ---
+export const accompanimentItemsRepository = {
+  async getAll(): Promise<AccompanimentItem[]> {
+    const list = await localDB.getAll<AccompanimentItem>('accompaniment_items');
+    return list
+      .filter(item => !item.deletedAt)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  },
+
+  async getByGroupId(groupId: string): Promise<AccompanimentItem[]> {
+    const list = await localDB.getByIndex<AccompanimentItem>('accompaniment_items', 'groupId', groupId);
+    return list
+      .filter(item => !item.deletedAt)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  },
+
+  async getById(id: string): Promise<AccompanimentItem | null> {
+    const item = await localDB.get<AccompanimentItem>('accompaniment_items', id);
+    if (item && item.deletedAt) return null;
+    return item;
+  },
+
+  async save(item: AccompanimentItem): Promise<void> {
+    const now = new Date().toISOString();
+    const isNew = !(await localDB.get('accompaniment_items', item.id));
+
+    item.updatedAt = now;
+    if (isNew) {
+      item.createdAt = now;
+    }
+
+    await localDB.put('accompaniment_items', item);
+
+    const devId = await getOrRegisterDeviceId();
+    await syncQueueRepository.enqueue(
+      'accompaniment_item',
+      item.id,
+      isNew ? 'CREATE' : 'UPDATE',
+      item,
+      devId
+    );
+  },
+
+  async delete(id: string): Promise<void> {
+    const item = await this.getById(id);
+    if (item) {
+      const now = new Date().toISOString();
+      item.deletedAt = now;
+      item.updatedAt = now;
+      await localDB.put('accompaniment_items', item);
+
+      const devId = await getOrRegisterDeviceId();
+      await syncQueueRepository.enqueue(
+        'accompaniment_item',
+        id,
+        'DELETE',
+        { id, deletedAt: now },
+        devId
+      );
+    }
+  }
+};
+
+// --- 1.3 REPOSITÓRIO DE VÍNCULOS PRODUTO-GRUPO ---
+export const productAccompanimentLinksRepository = {
+  async getAll(): Promise<ProductAccompanimentLink[]> {
+    return localDB.getAll<ProductAccompanimentLink>('product_accompaniment_links');
+  },
+
+  async getByProductId(productId: string): Promise<ProductAccompanimentLink[]> {
+    const list = await localDB.getByIndex<ProductAccompanimentLink>('product_accompaniment_links', 'productId', productId);
+    return list.filter(l => l.active !== false).sort((a, b) => a.sortOrder - b.sortOrder);
+  },
+
+  async getByGroupId(groupId: string): Promise<ProductAccompanimentLink[]> {
+    const list = await localDB.getByIndex<ProductAccompanimentLink>('product_accompaniment_links', 'groupId', groupId);
+    return list.filter(l => l.active !== false);
+  },
+
+  async save(link: ProductAccompanimentLink): Promise<void> {
+    const now = new Date().toISOString();
+    const isNew = !(await localDB.get('product_accompaniment_links', link.id));
+
+    link.updatedAt = now;
+    if (isNew) {
+      link.createdAt = now;
+    }
+
+    await localDB.put('product_accompaniment_links', link);
+
+    const devId = await getOrRegisterDeviceId();
+    await syncQueueRepository.enqueue(
+      'product_accompaniment_link',
+      link.id,
+      isNew ? 'CREATE' : 'UPDATE',
+      link,
+      devId
+    );
+  },
+
+  async delete(id: string): Promise<void> {
+    await localDB.delete('product_accompaniment_links', id);
+    const devId = await getOrRegisterDeviceId();
+    await syncQueueRepository.enqueue(
+      'product_accompaniment_link',
+      id,
+      'DELETE',
+      { id },
+      devId
+    );
+  },
+
+  async setLinksForProduct(productId: string, groupIds: string[]): Promise<void> {
+    const currentLinks = await this.getByProductId(productId);
+    const currentGroupIds = new Set(currentLinks.map(l => l.groupId));
+    const newGroupIds = new Set(groupIds);
+
+    // Remove deleted links
+    for (const cl of currentLinks) {
+      if (!newGroupIds.has(cl.groupId)) {
+        await this.delete(cl.id);
+      }
+    }
+
+    // Add or update links
+    for (let i = 0; i < groupIds.length; i++) {
+      const gId = groupIds[i];
+      const existing = currentLinks.find(cl => cl.groupId === gId);
+      if (existing) {
+        if (existing.sortOrder !== i + 1) {
+          existing.sortOrder = i + 1;
+          await this.save(existing);
+        }
+      } else {
+        const newLink: ProductAccompanimentLink = {
+          id: generateLocalId(),
+          productId,
+          groupId: gId,
+          sortOrder: i + 1,
+          active: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        await this.save(newLink);
+      }
+    }
+  }
+};
+
+/**
+ * Unified resolver for fetching all active Accompaniment Groups and active Items assigned to a product.
+ * Strictly resolves groups via product's category inheritance (Product.categoryId -> Category -> AccompanimentGroup).
+ * Ignores legacy product-level direct links to ensure the category is the single source of truth.
+ */
+export async function getAccompanimentGroupsForProduct(
+  productIdOrProduct: string | Product
+): Promise<{ group: AccompanimentGroup; items: AccompanimentItem[] }[]> {
+  const product = typeof productIdOrProduct === 'string'
+    ? await productsRepository.getById(productIdOrProduct)
+    : productIdOrProduct;
+
+  if (!product || !product.categoryId) return [];
+
+  // Active non-deleted category check
+  const category = await categoriesRepository.getById(product.categoryId);
+  if (!category || category.deletedAt || category.active === false) return [];
+
+  const [allGroups, allItems] = await Promise.all([
+    accompanimentGroupsRepository.getAll(),
+    accompanimentItemsRepository.getAll()
+  ]);
+
+  // Group deduplication map by group.id
+  const groupMap = new Map<string, AccompanimentGroup>();
+
+  for (const grp of allGroups) {
+    if (!grp.active || grp.deletedAt) continue;
+
+    // Resolve category IDs linked to this group
+    const groupCatIds = grp.categoryIds && grp.categoryIds.length > 0 
+      ? grp.categoryIds 
+      : (grp.categoryId ? [grp.categoryId] : []);
+
+    // Single source of truth: Group must be GLOBAL or explicitly contain product's current categoryId
+    const isMatch = grp.scope === 'GLOBAL' || groupCatIds.includes(product.categoryId);
+
+    if (isMatch) {
+      groupMap.set(grp.id, grp);
+    }
+  }
+
+  const matchedGroups = Array.from(groupMap.values());
+
+  // Deterministic sorting: sortOrder ASC, then name ASC
+  matchedGroups.sort((a, b) => {
+    const orderA = a.sortOrder ?? 1;
+    const orderB = b.sortOrder ?? 1;
+    if (orderA !== orderB) return orderA - orderB;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+
+  const result: { group: AccompanimentGroup; items: AccompanimentItem[] }[] = [];
+
+  for (const group of matchedGroups) {
+    const groupItems = allItems
+      .filter(item => item.groupId === group.id && item.active && !item.deletedAt && item.available !== false)
+      .sort((a, b) => (a.sortOrder ?? 1) - (b.sortOrder ?? 1));
+
+    result.push({
+      group,
+      items: groupItems
+    });
+  }
+
+  return result;
+}
+
+// Central Domain Aliases
+export const resolveAccompanimentGroupsForProduct = getAccompanimentGroupsForProduct;
+export const getInheritedAccompanimentGroups = getAccompanimentGroupsForProduct;
+export const getApplicableAccompanimentGroups = getAccompanimentGroupsForProduct;
+
 // --- 2. REPOSITÓRIO DE CATEGORIAS ---
 export const categoriesRepository = {
   async getAll(): Promise<Category[]> {
@@ -580,14 +1180,19 @@ export const ordersRepository = {
     return item;
   },
 
-  async create(orderData: Omit<Order, 'id' | 'localId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'deletedAt'>): Promise<Order> {
+  async create(orderData: Omit<Order, 'id' | 'localId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'deletedAt' | 'deviceId' | 'companyId' | 'serviceFee'> & Partial<Pick<Order, 'deviceId' | 'companyId' | 'serviceFee'>>): Promise<Order> {
     const id = generateLocalId();
     const all = await this.getAll();
     const sequential = all.length + 1001;
     const localId = `YML-${sequential}`;
     const now = new Date().toISOString();
 
+    const deviceId = (await getOrRegisterDeviceId()) || 'dev-1';
+
     const order: Order = {
+      deviceId,
+      companyId: 'comp-1',
+      serviceFee: 0,
       ...orderData,
       id,
       localId,
@@ -960,6 +1565,9 @@ export const productionRepository = {
               quantity: item.quantity,
               notes: item.notes,
               status: itemStatus,
+              selectedAccompaniments: item.selectedAccompaniments,
+              selectedOptions: item.selectedOptions,
+              selectedAddons: item.selectedAddons,
               roundNumber,
               roundId,
               createdAt: item.createdAt || order.createdAt || now,
@@ -1070,6 +1678,9 @@ export const productionRepository = {
                 quantity: item.quantity,
                 notes: item.notes,
                 status: itemStatus,
+                selectedAccompaniments: item.selectedAccompaniments,
+                selectedOptions: item.selectedOptions,
+                selectedAddons: item.selectedAddons,
                 roundNumber,
                 roundId,
                 createdAt: item.createdAt || order.createdAt || now,
@@ -1089,6 +1700,9 @@ export const productionRepository = {
                   quantity: excessQty,
                   notes: item.notes ? `${item.notes} (Adicional)` : undefined,
                   status: 'PENDING',
+                  selectedAccompaniments: item.selectedAccompaniments,
+                  selectedOptions: item.selectedOptions,
+                  selectedAddons: item.selectedAddons,
                   roundNumber,
                   roundId,
                   createdAt: now,

@@ -23,14 +23,16 @@ import { Button } from '../components/ui/Button';
 import {
   productsRepository,
   categoriesRepository,
+  accompanimentGroupsRepository,
   getOrRegisterDeviceId
 } from '../services/storage';
-import { Product, Category } from '../services/storage/types';
+import { Product, Category, AccompanimentGroup } from '../services/storage/types';
 import { formatCentsToBRL, parseBRLToCents } from '../utils/currency';
 
 export function AdminProdutosView() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [accompanimentGroups, setAccompanimentGroups] = useState<AccompanimentGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [deviceId, setDeviceId] = useState('');
 
@@ -64,6 +66,17 @@ export function AdminProdutosView() {
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Computed inherited accompaniment groups for the selected form category
+  const inheritedGroups = useMemo(() => {
+    if (!formCategoryId) return [];
+    return accompanimentGroups.filter(g => {
+      if (!g.active || g.deletedAt) return false;
+      if (g.scope === 'GLOBAL') return true;
+      const cIds = g.categoryIds && g.categoryIds.length > 0 ? g.categoryIds : (g.categoryId ? [g.categoryId] : []);
+      return cIds.includes(formCategoryId);
+    });
+  }, [formCategoryId, accompanimentGroups]);
+
   // Load Data from IndexedDB
   const loadData = async () => {
     setLoading(true);
@@ -71,13 +84,15 @@ export function AdminProdutosView() {
       const devId = await getOrRegisterDeviceId();
       setDeviceId(devId);
 
-      const [prods, cats] = await Promise.all([
+      const [prods, cats, grps] = await Promise.all([
         productsRepository.getAll(),
-        categoriesRepository.getAll()
+        categoriesRepository.getAll(),
+        accompanimentGroupsRepository.getAll()
       ]);
 
       setProducts(prods);
       setCategories(cats);
+      setAccompanimentGroups(grps);
     } catch (e) {
       console.error('Error loading products for admin:', e);
     } finally {
@@ -119,8 +134,14 @@ export function AdminProdutosView() {
   }, [products, searchTerm, selectedCategory, statusFilter, availabilityFilter]);
 
   // Open Modal for Create or Edit
-  const openModal = (product?: Product) => {
+  const openModal = async (product?: Product) => {
     setFormError(null);
+    try {
+      const grps = await accompanimentGroupsRepository.getAll();
+      setAccompanimentGroups(grps);
+    } catch (e) {
+      console.error('Error refreshing accompaniment groups on openModal:', e);
+    }
     if (product) {
       setEditingProduct(product);
       setFormName(product.name);
@@ -567,6 +588,28 @@ export function AdminProdutosView() {
                   </select>
                 </div>
               </div>
+
+              {/* Category Inheritance Callout for Accompaniments */}
+              {formCategoryId && (
+                <div className="p-3 bg-amber-50 border border-amber-200/80 rounded-xl flex flex-col gap-1.5 text-xs">
+                  <span className="font-extrabold text-amber-950">Acompanhamentos deste produto:</span>
+                  <p className="text-[11px] text-slate-600 font-medium">
+                    Os acompanhamentos deste produto são herdados automaticamente das suas categorias.
+                  </p>
+                  {inheritedGroups.length > 0 ? (
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      <span className="text-[10px] text-slate-500 font-bold">Grupos herdados:</span>
+                      {inheritedGroups.map(grp => (
+                        <span key={grp.id} className="text-[10px] font-extrabold bg-white text-amber-950 border border-amber-300 px-2 py-0.5 rounded-md">
+                          {grp.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-[11px] text-slate-400 italic">Nenhum grupo de acompanhamento vinculado a esta categoria.</span>
+                  )}
+                </div>
+              )}
 
               {/* Description */}
               <div className="flex flex-col gap-1">

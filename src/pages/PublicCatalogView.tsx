@@ -47,7 +47,7 @@ export function PublicCatalogView() {
     const unsubscribe = cartService.subscribe(() => {
       setCart(cartService.getCart());
     });
-    return unsubscribe;
+    return () => unsubscribe();
   }, []);
 
   // Fetch real catalog from IndexedDB

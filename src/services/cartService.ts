@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { OrderItemAccompaniment } from './storage/types';
+
 export interface CartItemOption {
   optionId: string;
   optionName: string;
@@ -22,12 +24,13 @@ export interface CartItem {
   id: string; // Unique cart item ID
   productId: string;
   productNameSnapshot: string;
-  unitPriceSnapshot: number; // In cents
+  unitPriceSnapshot: number; // In cents (base product price in cents)
   quantity: number;
   notes?: string;
+  selectedAccompaniments?: OrderItemAccompaniment[];
   selectedOptions?: CartItemOption[];
   selectedAddons?: CartItemAddon[];
-  subtotal: number; // In cents ( (unitPriceSnapshot + optionsPrice + addonsPrice) * quantity )
+  subtotal: number; // In cents ( (unitPriceSnapshot + accompaniments/options/addons) * quantity )
 }
 
 export interface CartState {
@@ -44,6 +47,11 @@ const listeners: Set<() => void> = new Set();
 
 function calculateItemSubtotal(item: Omit<CartItem, 'id' | 'subtotal'>): number {
   let unitTotal = item.unitPriceSnapshot;
+  if (item.selectedAccompaniments) {
+    for (const acc of item.selectedAccompaniments) {
+      unitTotal += (acc.subtotal !== undefined ? acc.subtotal : (acc.priceSnapshot * acc.quantity));
+    }
+  }
   if (item.selectedOptions) {
     for (const opt of item.selectedOptions) {
       unitTotal += opt.additionalPrice || 0;
@@ -104,6 +112,10 @@ export const cartService = {
     const cart = this.getCart();
     
     // Generate deterministic ID or find existing matching item
+    const accompanimentsKey = (newItem.selectedAccompaniments || [])
+      .map(a => `${a.groupId}:${a.itemId}:${a.quantity}`)
+      .sort()
+      .join('|');
     const optionsKey = (newItem.selectedOptions || [])
       .map(o => `${o.optionId}:${o.choiceId}`)
       .sort()
@@ -113,7 +125,7 @@ export const cartService = {
       .sort()
       .join('|');
     
-    const signature = `${newItem.productId}_${optionsKey}_${addonsKey}_${newItem.notes || ''}`;
+    const signature = `${newItem.productId}_${accompanimentsKey}_${optionsKey}_${addonsKey}_${newItem.notes || ''}`;
 
     const existingIndex = cart.items.findIndex(i => i.id === signature);
 

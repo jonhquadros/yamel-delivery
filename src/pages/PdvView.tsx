@@ -38,19 +38,29 @@ import {
   categoriesRepository,
   ordersRepository,
   syncQueueRepository,
-  getOrRegisterDeviceId
+  getOrRegisterDeviceId,
+  getAccompanimentGroupsForProduct
 } from '../services/storage';
 import {
   Category,
   Product,
   ProductOption,
   ProductAddon,
+  AccompanimentGroup,
+  AccompanimentItem,
   Order,
   OrderItem,
   OrderItemOption,
   OrderItemAddon,
+  OrderItemAccompaniment,
   PaymentMethod
 } from '../services/storage/types';
+import {
+  validateAccompanimentSelections,
+  buildOrderItemAccompaniments,
+  calculateTotalAccompanimentsPrice
+} from '../services/accompanimentService';
+import { AccompanimentSelector, AccompanimentGroupWithItems } from '../components/accompaniments/AccompanimentSelector';
 
 // Item structure in the PDV cart
 export interface PdvCartItem {
@@ -61,6 +71,7 @@ export interface PdvCartItem {
   quantity: number;
   subtotal: number; // Integer in CENTS (unitPrice * quantity)
   notes?: string;
+  selectedAccompaniments?: OrderItemAccompaniment[];
   selectedOptions?: OrderItemOption[];
   selectedAddons?: OrderItemAddon[];
 }
@@ -90,14 +101,17 @@ export function PdvView() {
   const [receivedAmountText, setReceivedAmountText] = useState<string>('');
   const [orderNotes, setOrderNotes] = useState<string>('');
 
-  // Config Modal State (for product options / addons)
+  // Config Modal State (for product accompaniments / options / addons)
   const [configuringProduct, setConfiguringProduct] = useState<Product | null>(null);
+  const [productAccompaniments, setProductAccompaniments] = useState<AccompanimentGroupWithItems[]>([]);
   const [productOptions, setProductOptions] = useState<ProductOption[]>([]);
   const [productAddons, setProductAddons] = useState<ProductAddon[]>([]);
   const [modalQuantity, setModalQuantity] = useState<number>(1);
   const [modalNotes, setModalNotes] = useState<string>('');
+  const [selectedAccompaniments, setSelectedAccompaniments] = useState<Record<string, Record<string, number>>>({});
   const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>({}); // optionId -> choiceId
   const [selectedAddons, setSelectedAddons] = useState<Record<string, number>>({}); // addonId -> quantity
+  const [modalAccValidationError, setModalAccValidationError] = useState<string | null>(null);
 
   // Checkout Processing & Success Modal
   const [submitting, setSubmitting] = useState<boolean>(false);
@@ -160,21 +174,34 @@ export function PdvView() {
   // Handle clicking a product in the catalog
   const handleSelectProduct = async (product: Product) => {
     try {
-      const [opts, adds] = await Promise.all([
+      const [accGroups, opts, adds] = await Promise.all([
+        getAccompanimentGroupsForProduct(product.id),
         productsRepository.getOptions(product.id),
         productsRepository.getAddons(product.id)
       ]);
 
+      const activeAccGroups = accGroups || [];
       const activeOpts = opts || [];
       const activeAdds = (adds || []).filter(a => a.active);
 
-      // If product has options or addons, open customization modal
-      if (activeOpts.length > 0 || activeAdds.length > 0) {
+      // If product has accompaniments, options, or addons, open customization modal
+      if (activeAccGroups.length > 0 || activeOpts.length > 0 || activeAdds.length > 0) {
         setConfiguringProduct(product);
+        setProductAccompaniments(activeAccGroups);
         setProductOptions(activeOpts);
         setProductAddons(activeAdds);
         setModalQuantity(1);
         setModalNotes('');
+        setModalAccValidationError(null);
+
+        // Pre-select first choice for single-choice required accompaniment groups
+        const initialAccSelections: Record<string, Record<string, number>> = {};
+        activeAccGroups.forEach(({ group, items }) => {
+          if (group.required && group.maxSelections === 1 && items.length > 0) {
+            initialAccSelections[group.id] = { [items[0].id]: 1 };
+          }
+        });
+        setSelectedAccompaniments(initialAccSelections);
 
         // Pre-select required options
         const initialChoices: Record<string, string> = {};
@@ -190,16 +217,16 @@ export function PdvView() {
         addSimpleProductToCart(product);
       }
     } catch (err) {
-      console.error('Erro ao buscar adicionais do produto:', err);
+      console.error('Erro ao buscar adicionais e acompanhamentos do produto:', err);
       addSimpleProductToCart(product);
     }
   };
 
-  // Add a simple product (without options/addons) to cart
+  // Add a simple product (without options/addons/accompaniments) to cart
   const addSimpleProductToCart = (product: Product) => {
     setCartItems(prev => {
       const existingIndex = prev.findIndex(
-        item => item.productId === product.id && !item.selectedOptions && !item.selectedAddons && !item.notes
+        item => item.productId === product.id && !item.selectedAccompaniments && !item.selectedOptions && !item.selectedAddons && !item.notes
       );
 
       if (existingIndex >= 0) {
@@ -227,10 +254,19 @@ export function PdvView() {
     });
   };
 
-  // Calculate Unit Total for the Modal Item (Base Price + Choices + Addons)
+  // Extract flat lists for accompaniment calculations
+  const modalAccGroups = useMemo(() => productAccompaniments.map(g => g.group), [productAccompaniments]);
+  const modalAccItems = useMemo(() => productAccompaniments.flatMap(g => g.items), [productAccompaniments]);
+
+  // Real-time accompaniments price calculation in cents
+  const modalAccompanimentsPriceCents = useMemo(() => {
+    return calculateTotalAccompanimentsPrice(modalAccGroups, modalAccItems, selectedAccompaniments);
+  }, [modalAccGroups, modalAccItems, selectedAccompaniments]);
+
+  // Calculate Unit Total for the Modal Item (Base Price + Accompaniments + Choices + Addons)
   const modalUnitTotalCents = useMemo(() => {
     if (!configuringProduct) return 0;
-    let total = configuringProduct.price;
+    let total = configuringProduct.price + modalAccompanimentsPriceCents;
 
     productOptions.forEach(opt => {
       const choiceId = selectedChoices[opt.id];
@@ -250,11 +286,28 @@ export function PdvView() {
     });
 
     return total;
-  }, [configuringProduct, productOptions, productAddons, selectedChoices, selectedAddons]);
+  }, [configuringProduct, modalAccompanimentsPriceCents, productOptions, productAddons, selectedChoices, selectedAddons]);
 
   // Confirm product configuration in Modal and add to Cart
   const handleConfirmAddFromModal = () => {
     if (!configuringProduct) return;
+
+    // Validate accompaniments
+    if (modalAccGroups.length > 0) {
+      const validation = validateAccompanimentSelections(modalAccGroups, modalAccItems, selectedAccompaniments);
+      if (!validation.valid) {
+        setModalAccValidationError(validation.errors[0]?.message || 'Verifique as opções obrigatórias.');
+        return;
+      }
+    }
+    setModalAccValidationError(null);
+
+    // Build accompaniments snapshot
+    const formattedAccompaniments = buildOrderItemAccompaniments(
+      modalAccGroups,
+      modalAccItems,
+      selectedAccompaniments
+    );
 
     // Build options snapshot
     const formattedOptions: OrderItemOption[] = [];
@@ -296,6 +349,7 @@ export function PdvView() {
       quantity: modalQuantity,
       subtotal: modalUnitTotalCents * modalQuantity,
       notes: modalNotes.trim() || undefined,
+      selectedAccompaniments: formattedAccompaniments.length > 0 ? formattedAccompaniments : undefined,
       selectedOptions: formattedOptions.length > 0 ? formattedOptions : undefined,
       selectedAddons: formattedAddons.length > 0 ? formattedAddons : undefined
     };
@@ -419,6 +473,7 @@ export function PdvView() {
         subtotal: item.subtotal,
         notes: item.notes,
         status: 'PENDING',
+        selectedAccompaniments: item.selectedAccompaniments,
         selectedOptions: item.selectedOptions,
         selectedAddons: item.selectedAddons,
         createdAt: now,
@@ -942,6 +997,17 @@ export function PdvView() {
               </p>
             </div>
 
+            {/* ACCOMPANIMENTS */}
+            {productAccompaniments.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <AccompanimentSelector
+                  groupsWithItems={productAccompaniments}
+                  selectedItems={selectedAccompaniments}
+                  onChange={setSelectedAccompaniments}
+                />
+              </div>
+            )}
+
             {/* OPTIONS */}
             {productOptions.map(opt => (
               <div key={opt.id} className="flex flex-col gap-1.5 p-3 bg-slate-50 border border-slate-200 rounded-xl">
@@ -1034,6 +1100,14 @@ export function PdvView() {
                 className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-amber-500"
               />
             </div>
+
+            {/* MODAL VALIDATION ERROR */}
+            {modalAccValidationError && (
+              <div className="p-2.5 bg-amber-50 border border-amber-300 rounded-lg flex items-center gap-2 text-xs font-bold text-amber-800">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>{modalAccValidationError}</span>
+              </div>
+            )}
 
             {/* QUANTITY & CONFIRM BUTTON */}
             <div className="flex items-center justify-between pt-2 border-t border-slate-100">
