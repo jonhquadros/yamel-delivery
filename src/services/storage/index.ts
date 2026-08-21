@@ -5,6 +5,7 @@
 
 import { localDB, generateLocalId } from './idb';
 export { generateLocalId };
+import { enqueueKitchenPrintForTicket } from '../printingService';
 import {
   SyncStatus,
   SyncQueueItem,
@@ -1616,6 +1617,13 @@ export const productionRepository = {
             devId
           );
           ticketMap.set(ticketKey, newTicket);
+
+          // Disparar enfileiramento automático de impressão para o KDS (assíncrono e não-bloqueante)
+          try {
+            await enqueueKitchenPrintForTicket(newTicket);
+          } catch (printErr) {
+            console.warn('[KDS Printing] Falha ao enfileirar impressão do ticket de cozinha:', printErr);
+          }
         } else {
           // Ticket já existe para essa ordem + rodada + estação: verificar alterações
           let hasChanges = false;
@@ -2522,3 +2530,18 @@ export async function updateTableStatus(tableId: string, status: any, activeOrde
     await tablesRepository.save(table);
   }
 }
+
+// --- REPOSITÓRIOS E SERVIÇOS DE IMPRESSÃO ---
+export { printingQueueRepository, printerConfigRepository } from '../../printers/printingQueueRepository';
+export { printingService, enqueueKitchenPrintForTicket, enqueueDeliveryOrder } from '../printingService';
+export type {
+  PrintJob,
+  PrintJobType,
+  PrintJobStatus,
+  PrintJobSource,
+  PrinterConfig,
+  PrinterConnectionType,
+  PrinterPaperWidth,
+  PrintPayload
+} from '../../printers/types';
+

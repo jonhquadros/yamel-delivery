@@ -11,7 +11,7 @@ import {
 } from './types';
 
 const DB_NAME = 'yamel_offline_db_v2';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 export type StoreName =
   | 'companies'
@@ -33,7 +33,9 @@ export type StoreName =
   | 'sync_queue'
   | 'devices'
   | 'production_tickets'
-  | 'device_config'; // Backward compatibility
+  | 'device_config' // Backward compatibility
+  | 'printing_queue'
+  | 'printer_configs';
 
 export class YamelDB {
   private db: IDBDatabase | null = null;
@@ -182,6 +184,24 @@ export class YamelDB {
         // Legacy configuration store preserved for back-compat
         if (!db.objectStoreNames.contains('device_config')) {
           db.createObjectStore('device_config', { keyPath: 'deviceId' });
+        }
+
+        // 17. Printing Queue
+        if (!db.objectStoreNames.contains('printing_queue')) {
+          const store = db.createObjectStore('printing_queue', { keyPath: 'id' });
+          store.createIndex('status', 'status', { unique: false });
+          store.createIndex('createdAt', 'createdAt', { unique: false });
+          store.createIndex('eventKey', 'eventKey', { unique: false });
+          store.createIndex('orderId', 'orderId', { unique: false });
+          store.createIndex('ticketId', 'ticketId', { unique: false });
+          store.createIndex('station', 'station', { unique: false });
+        }
+
+        // 18. Printer Configs
+        if (!db.objectStoreNames.contains('printer_configs')) {
+          const store = db.createObjectStore('printer_configs', { keyPath: 'id' });
+          store.createIndex('station', 'station', { unique: false });
+          store.createIndex('enabled', 'enabled', { unique: false });
         }
       };
 

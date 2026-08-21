@@ -30,13 +30,14 @@ import {
   Building2,
   Users,
   X,
-  Edit3
+  Edit3,
+  Printer
 } from 'lucide-react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Drawer } from '../components/ui/Overlay';
 import { LoadingState } from '../components/ui/Feedback';
-import { ordersRepository, syncQueueRepository } from '../services/storage';
+import { ordersRepository, syncQueueRepository, enqueueDeliveryOrder } from '../services/storage';
 import { Order, OrderStatus, PaymentStatus } from '../services/storage/types';
 import { formatCentsToBRL } from '../utils/currency';
 import { whatsappService } from '../services/whatsappService';
@@ -95,6 +96,39 @@ export function DeliveryView() {
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
+
+  // Delivery Printing State (Etapa 17)
+  const [isPrintingDelivery, setIsPrintingDelivery] = useState<boolean>(false);
+  const [printFeedback, setPrintFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const handlePrintDelivery = async (order: Order) => {
+    if (isPrintingDelivery) return;
+    try {
+      setIsPrintingDelivery(true);
+      setPrintFeedback(null);
+
+      const job = await enqueueDeliveryOrder(order);
+      if (job) {
+        setPrintFeedback({
+          type: 'success',
+          message: 'Impressão adicionada à fila.',
+        });
+      } else {
+        setPrintFeedback({
+          type: 'error',
+          message: 'Não foi possível adicionar a impressão à fila.',
+        });
+      }
+    } catch (err) {
+      console.error('Erro ao imprimir pedido de delivery:', err);
+      setPrintFeedback({
+        type: 'error',
+        message: 'Erro ao processar solicitação de impressão.',
+      });
+    } finally {
+      setIsPrintingDelivery(false);
+    }
+  };
 
   // Payment Confirmation Modal State (Etapa 09.9)
   const [paymentModalOrder, setPaymentModalOrder] = useState<Order | null>(null);
@@ -1054,6 +1088,8 @@ export function DeliveryView() {
           setSelectedOrder(null);
           setIsEditing(false);
           setStatusError(null);
+          setPrintFeedback(null);
+          setIsPrintingDelivery(false);
         }}
         title={
           selectedOrder
@@ -1100,6 +1136,32 @@ export function DeliveryView() {
                   <span>{statusError}</span>
                 </div>
               )}
+
+              {/* Botão de Impressão Manual de Delivery (Etapa 17) */}
+              <div className="flex flex-col gap-1.5">
+                <button
+                  id={`btn-delivery-print-${selectedOrder.id}`}
+                  type="button"
+                  disabled={isPrintingDelivery}
+                  onClick={() => handlePrintDelivery(selectedOrder)}
+                  className="w-full py-2.5 px-3 bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 border border-purple-200 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-all shadow-2xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Printer className={`w-4 h-4 text-purple-600 ${isPrintingDelivery ? 'animate-pulse' : ''}`} />
+                  <span>{isPrintingDelivery ? 'Enviando para a fila...' : '🖨 Imprimir Entrega'}</span>
+                </button>
+                {printFeedback && (
+                  <div
+                    id="delivery-print-feedback"
+                    className={`text-[11px] font-bold text-center px-2.5 py-1.5 rounded-lg border ${
+                      printFeedback.type === 'success'
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : 'bg-red-50 text-red-800 border-red-200'
+                    }`}
+                  >
+                    {printFeedback.message}
+                  </div>
+                )}
+              </div>
 
               {/* Botão de Edição de Pedido de Delivery */}
               {getOrderEditPermissions(selectedOrder).allowed && (

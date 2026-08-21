@@ -23,7 +23,8 @@ export type SyncEntityName =
   | 'cash_movement'
   | 'delivery'
   | 'device'
-  | 'production_ticket';
+  | 'production_ticket'
+  | 'printing_queue';
 
 export interface SyncQueueItem {
   id: string; // Generated local UUID
@@ -487,4 +488,16 @@ export interface ProductionTicket extends Auditable {
   syncStatus: SyncStatus;
   deviceId: string;
 }
+
+// --- 13. PRINTERS & PRINT QUEUE ---
+export type {
+  PrintJobType,
+  PrintJobSource,
+  PrintJobStatus,
+  PrinterConnectionType,
+  PrinterPaperWidth,
+  PrinterConfig,
+  PrintPayload,
+  PrintJob,
+} from '../../printers/types';
 
